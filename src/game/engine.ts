@@ -626,13 +626,17 @@ export class GameEngine {
       if (item.progress < 1) continue;
       if (d.kind === 'building') { item.ready = true; this.event(`${d.name}已就绪，请选择放置位置。`, p.id, 'complete'); }
       else {
-        const factory = this.entities.find(e => e.owner === p.id && getDefinition(e.type).producer === category);
+        const factories = this.entities.filter(e => e.owner === p.id && e.hp > 0 && getDefinition(e.type).producer === category);
+        const factory = category === 'aircraft'
+          ? factories.find(e => this.aircraftPad(e) !== undefined)
+          : factories[0];
         if (!factory && !this.bootcamp) continue;
-        const pos = this.bootcamp ? this.trainingSpawn(p.id, d) : this.exitPosition(factory!, d);
+        const pos = this.bootcamp ? this.trainingSpawn(p.id, d)
+          : category === 'aircraft' ? this.aircraftPad(factory!) : this.exitPosition(factory!, d);
         if (!pos) continue;
         const e = this.spawnEntity(d.id, p.id, pos.x, pos.y);
         p.queues[category].shift(); p.unitsBuilt++;
-        if (!d.harvest && factory && !this.bootcamp) {
+        if (!d.harvest && category !== 'aircraft' && factory && !this.bootcamp) {
           const rally = this.nearestPassable({ x: factory.x + 4, y: factory.y + 5 }, d);
           this.setOrder(e, { kind: 'move', x: rally.x, y: rally.y });
         }
@@ -960,6 +964,18 @@ export class GameEngine {
   private exitPosition(factory: Entity, unit: Definition): Point {
     const size = getDefinition(factory.type).size ?? [2, 2];
     return this.nearestPassable({ x: factory.x + size[0] / 2 + 1, y: factory.y + size[1] / 2 + 1 }, unit, 18);
+  }
+
+  private aircraftPad(factory: Entity): Point | undefined {
+    const pads = [
+      { x: factory.x - .7, y: factory.y - .55 },
+      { x: factory.x + .7, y: factory.y - .55 },
+      { x: factory.x - .7, y: factory.y + .55 },
+      { x: factory.x + .7, y: factory.y + .55 },
+    ];
+    return pads.find(pad => !this.entities.some(e =>
+      e.hp > 0 && e.owner === factory.owner && getDefinition(e.type).category === 'aircraft'
+      && !e.transportedBy && distance(e, pad) < .4));
   }
 
   private assignHarvest(e: Entity) {

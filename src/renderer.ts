@@ -218,7 +218,7 @@ export class BattlefieldRenderer {
       const box = this.displayedSprites.get(e.id);
       if (e.kind === 'building' && box && x > box.x + box.w * .15 && x < box.x + box.w * .85 && y > box.y + box.h * .3 && y < box.y + box.h * .92) return e;
       const r = (def.category === 'infantry' ? 11 : def.naval ? 28 : 20) * this.zoom;
-      if (Math.abs(x - p.x) < r && Math.abs(y - (p.y - (def.flying ? 45 * this.zoom : 5))) < r) nearest = e;
+      if (Math.abs(x - p.x) < r && Math.abs(y - (p.y - (def.flying ? this.flyingHeight(e, def) * this.zoom : 5))) < r) nearest = e;
     }
     return nearest;
   }
@@ -354,12 +354,21 @@ export class BattlefieldRenderer {
   }
   private drawDragRect(){const ctx=this.ctx;if(this.dragRect){const r=this.dragRect;ctx.fillStyle='#89df7312';ctx.fillRect(r.x,r.y,r.w,r.h);ctx.strokeStyle='#a0f184';ctx.lineWidth=1;ctx.strokeRect(r.x+.5,r.y+.5,r.w,r.h);}}
   private spriteKey(def: Definition) { const snow = `${def.sprite}-snow`; return this.map.theater?.toLowerCase() === 'snow' && this.assets.sprite(snow) ? snow : def.sprite; }
+  private flyingHeight(e: Entity, def: Definition): number {
+    if (!def.flying) return 0;
+    if (def.category === 'aircraft' && e.order.kind === 'idle' && this.game.entities.some(factory => {
+      if (factory.type !== 'airforce_command' || factory.owner !== e.owner || factory.hp <= 0) return false;
+      const [width, height] = getDefinition(factory.type).size ?? [3, 2];
+      return Math.abs(e.x - factory.x) < width / 2 && Math.abs(e.y - factory.y) < height / 2;
+    })) return 0;
+    return 45 + Math.sin(this.time * 3 + e.id) * 2;
+  }
   private drawEntity(ctx: CanvasRenderingContext2D, e: Entity) {
     const def = getDefinition(e.type), p = this.project(e.x-(e.kind==='building'?.5:0), e.y-(e.kind==='building'?.5:0)); p.y -= this.elevation(e.x, e.y) * 15;
     const presentation=this.entityPresentation?.(e);p.y-=presentation?.height||0;
     const color = this.game.players.find(v => v.id === e.owner)?.color || PLAYER_COLORS[e.owner % PLAYER_COLORS.length] || '#898d86';
     const selected = this.selection.has(e.id), hovered = this.hoverEntity?.id === e.id;
-    const flying = def.flying ? 45 + Math.sin(this.time * 3 + e.id) * 2 : 0;
+    const flying = this.flyingHeight(e, def);
     const spriteKey = e.type==='ifv'&&e.turretIndex!=null?`fv-turret${e.turretIndex}`:this.spriteKey(def), sprite = presentation?.sprite || this.assets.sprite(spriteKey) || this.assets.scenery[`${this.map.theater}:${def.sprite.toLowerCase()}`];
     const shadowW = def.kind === 'building' ? 0 : def.category === 'infantry' ? 5 : def.naval ? 30 : 15;
     if(shadowW){ctx.fillStyle='#00100a44';ctx.beginPath();ctx.ellipse(p.x+flying*.2,p.y+3,shadowW,shadowW*.4,0,0,Math.PI*2);ctx.fill();}

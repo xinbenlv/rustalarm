@@ -48,6 +48,38 @@ test('deployment, technology prerequisites, paid construction, placement, and un
   assert.equal(engine.getPlayer(0)!.queues.infantry.length, 0);
 });
 
+test('fighters occupy airfield pads and wait when all pads are full', () => {
+  const engine = game();
+  engine.spawnEntity('construction_yard', 0, 12, 12);
+  engine.spawnEntity('soviet_construction_yard', 1, 51, 51);
+  engine.spawnEntity('power_plant', 0, 18, 12);
+  engine.spawnEntity('airforce_command', 0, 25.5, 25);
+  const pads = [
+    { x: 24.8, y: 24.45 }, { x: 26.2, y: 24.45 },
+    { x: 24.8, y: 25.55 }, { x: 26.2, y: 25.55 },
+  ];
+  for (const pad of pads) {
+    assert.ok(engine.build(0, 'harrier'));
+    advance(engine, CATALOG.harrier.buildTime + 1);
+    const fighter = engine.entities.filter(e => e.type === 'harrier')[pads.indexOf(pad)];
+    assert.ok(fighter, `pad ${pads.indexOf(pad)}: ${engine.status}, ${JSON.stringify(engine.getPlayer(0)!.queues.aircraft)}`);
+    assert.ok(Math.hypot(fighter.x - pad.x, fighter.y - pad.y) < .01);
+    assert.equal(fighter.order.kind, 'idle');
+  }
+  assert.ok(engine.build(0, 'harrier'));
+  advance(engine, CATALOG.harrier.buildTime + 1);
+  assert.equal(engine.entities.filter(e => e.type === 'harrier').length, 4);
+  assert.equal(engine.getPlayer(0)!.queues.aircraft.length, 1);
+
+  const secondAirfield = engine.spawnEntity('airforce_command', 0, 34.5, 25);
+  advance(engine, 1);
+  const fifth = engine.entities.filter(e => e.type === 'harrier')[4];
+  assert.ok(fifth);
+  assert.ok(Math.abs(fifth.x - secondAirfield.x) < 1.5);
+  assert.ok(Math.abs(fifth.y - secondAirfield.y) < 1);
+  assert.equal(engine.getPlayer(0)!.queues.aircraft.length, 0);
+});
+
 test('canceling a queued item refunds exactly its paid cost', () => {
   const engine = game(); deploy(engine);
   const before = engine.getPlayer(0)!.credits;
