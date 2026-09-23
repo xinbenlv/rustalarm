@@ -8,6 +8,7 @@ import type { Definition, Effect, Entity, GameEvent, GameMap, GameOptions, Order
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 const isTransport = (type: string) => !!CATALOG[type]?.transportCapacity;
+const ATTACK_WARNING_COOLDOWN = 60;
 const abilities: Record<string, { name: string; building?: string; duration: number }> = {
   paradrop: { name: '空降部队', building: 'airforce_command', duration: 90 },
   chronosphere: { name: '超时空传送', building: 'chronosphere', duration: 180 },
@@ -49,7 +50,7 @@ export class GameEngine {
   private randomState: number;
   private visibilityTimer = 0;
   private economyTimer = 0;
-  private alarmAt = -20;
+  private alarmAt = { base: -Infinity, miner: -Infinity };
   private entityMap = new Map<number, Entity>();
   private spatial = new Map<number, Entity[]>();
   private neutralPlayer: PlayerState;
@@ -884,8 +885,11 @@ export class GameEngine {
       target.lastHit = this.time;
       this.effect({kind: 'hit', x: target.x, y: target.y, targetId: target.id, sourceId: attacker?.id, duration: .4, weapon: attacker ? this.getCombatDefinition(attacker).weapon : undefined});
     }
-    if (target.owner === this.localPlayerId && this.time - this.alarmAt > 10) {
-      this.alarmAt = this.time; this.event(target.kind === 'building' ? '警告：我方基地正在遭受攻击！' : '我方部队正在遭受攻击！', target.owner, 'warning');
+    const warning = target.kind === 'building' ? 'base' : getDefinition(target.type).harvest ? 'miner' : undefined;
+    if (amount > 0 && target.owner === this.localPlayerId && !this.isAllied(attackerOwner, target.owner) &&
+        warning && this.time - this.alarmAt[warning] >= ATTACK_WARNING_COOLDOWN) {
+      this.alarmAt[warning] = this.time;
+      this.event(warning === 'base' ? '警告：我方基地正在遭受攻击！' : '我方采矿车正在遭受攻击！', target.owner, 'warning');
     }
     if (target.hp <= 0) {
       const killer = this.getPlayer(attackerOwner); if (killer && !this.isAllied(attackerOwner, target.owner)) killer.kills++;

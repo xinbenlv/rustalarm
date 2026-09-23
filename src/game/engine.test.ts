@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { CATALOG, COUNTRIES } from './data';
 import { GameEngine } from './engine';
 import { findPath } from './pathfinding';
-import type { GameMap, Terrain } from './types';
+import type { Entity, GameMap, Terrain } from './types';
 
 function battlefield(): GameMap {
   const cells: Terrain[] = Array(64 * 64).fill('land');
@@ -241,6 +241,46 @@ test('combat destroys targets and ending all enemy bases triggers victory', () =
   assert.equal(engine.getEntity(enemy.id), undefined);
   assert.equal(engine.status, 'victory');
   assert.ok(engine.getPlayer(0)!.kills >= 1);
+});
+
+test('hostile base and miner attacks warn independently at most once per minute', () => {
+  class WarningEngine extends GameEngine {
+    hit(target: Entity, amount: number, attackerOwner: number) { this.damage(target, amount, attackerOwner); }
+  }
+  const engine = new WarningEngine({
+    map: battlefield(),
+    players: [{ id: 0, name: 'Player', country: 'america', team: 0 }, { id: 1, name: 'CPU', country: 'russia', team: 0 }],
+    startingUnits: 0, fogOfWar: false,
+  });
+  const base = engine.spawnEntity('power_plant', 0, 20, 20);
+  const miner = engine.spawnEntity('chrono_miner', 0, 24, 20);
+  const unit = engine.spawnEntity('gi', 0, 26, 20);
+  const enemyBase = engine.spawnEntity('tesla_reactor', 1, 30, 20);
+  const warnings = () => engine.events.filter(event => event.kind === 'warning').map(event => event.text);
+
+  engine.hit(unit, 1, 1);
+  engine.hit(base, 0, 1);
+  engine.hit(base, 1, 0);
+  engine.hit(enemyBase, 1, 0);
+  assert.deepEqual(warnings(), []);
+
+  engine.hit(base, 1, 1);
+  assert.deepEqual(warnings(), ['警告：我方基地正在遭受攻击！']);
+  engine.time = 30;
+  engine.hit(miner, 1, 1);
+  assert.deepEqual(warnings(), ['警告：我方基地正在遭受攻击！', '我方采矿车正在遭受攻击！']);
+  engine.time = 59.9;
+  engine.hit(base, 1, 1);
+  assert.equal(warnings().length, 2);
+  engine.time = 60;
+  engine.hit(base, 1, 1);
+  assert.equal(warnings().length, 3);
+  engine.time = 89.9;
+  engine.hit(miner, 1, 1);
+  assert.equal(warnings().length, 3);
+  engine.time = 90;
+  engine.hit(miner, 1, 1);
+  assert.equal(warnings().length, 4);
 });
 
 test('fog follows scouts while previously revealed terrain stays explored', () => {
