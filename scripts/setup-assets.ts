@@ -12,6 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { configureMapData } from '../src/maps';
 
 export const SOURCE_URL = 'https://archive.org/download/red-alert-2-multiplayer/Red-Alert-2-Multiplayer.exe';
+const DOWNLOAD_URLS = [
+  'https://cors.archive.org/cors/red-alert-2-multiplayer/Red-Alert-2-Multiplayer.exe',
+  SOURCE_URL,
+];
 export const SOURCE_SHA256 = '5388c54d7d7b73060083563ff1926bca0d2663a76678b807e23e9a8d491441ce';
 export const SOURCE_BYTES = 206530229;
 export const ASSET_VERSION = 1;
@@ -156,8 +160,17 @@ async function downloadInstaller(cache: string): Promise<string> {
     if (explicit) throw new Error(`RA2_LOCAL_INSTALLER does not match the expected installer: ${candidate}`);
   }
   progress('download', '正在从 Internet Archive 下载原版素材（约 207 MB）。', 0);
-  const response = await fetch(SOURCE_URL, { signal: AbortSignal.timeout(30 * 60 * 1000) });
-  if (!response.ok || !response.body) throw new Error(`Internet Archive download failed: HTTP ${response.status}. Retry npm run assets:setup when the archive is reachable.`);
+  let response: Response | undefined;
+  let failure = '';
+  for (const url of DOWNLOAD_URLS) {
+    try {
+      const candidate = await fetch(url, { signal: AbortSignal.timeout(30 * 60 * 1000) });
+      if (candidate.ok && candidate.body) { response = candidate; break; }
+      failure = `HTTP ${candidate.status}`;
+      await candidate.body?.cancel();
+    } catch (error) { failure = error instanceof Error ? error.message : String(error); }
+  }
+  if (!response?.body) throw new Error(`Internet Archive download failed: ${failure}. Retry npm run assets:setup when the archive is reachable.`);
   const total = Number(response.headers.get('content-length')) || SOURCE_BYTES;
   let received = 0, lastUpdate = 0;
   const counter = new Transform({ transform(chunk: Buffer, _encoding, callback) {
