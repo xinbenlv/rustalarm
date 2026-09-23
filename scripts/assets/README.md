@@ -57,10 +57,11 @@ npm run assets:check
 ```
 
 Requires Python 3.10+, 7-Zip (`7zz`/`7z`) and FFmpeg with MP3/libvpx support. Python packages
-are pinned in a cache-local virtual environment. Default cache: `.cache/ra2-assets/`;
+are pinned in a cache-local virtual environment. Default cache: ignored `_3p/`;
 outputs: `public/assets/` and `public/maps/`. `RA2_ASSET_CACHE` and `RA2_PUBLIC_DIR`
 override these paths. `--force` reconstructs; `--check` validates without download.
 Outputs are checked in staging; the readiness marker is published last.
+The clone setup prompt runs `npm ci` and this native pipeline after consent.
 
 ## Browser archive probe
 

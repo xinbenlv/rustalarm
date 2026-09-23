@@ -8,6 +8,28 @@ to freely build and recruit supported units on an asset training field.
 Created by [Victor Zhou](https://zzn.im) on 2026-09-04 using
 ChatGPT 6 Astra, with the original result at [v0.1.0](https://github.com/xinbenlv/ra2-gpt-6-astra-2026-09-04/commit/3b9e9eaa2aa3b13db1f1bb1daca0f833d48986bf).
 
+## Prepare local originals after cloning
+
+Git does not run hooks supplied by a newly cloned repository. On the first clone,
+run `sh scripts/prepare-local-assets.sh` after checkout. The script creates the
+ignored `_3p/` directory and asks before any download. A yes answer installs the
+Node dependencies, verifies the installer from Internet Archive, unpacks it under
+`_3p/`, and converts the assets into ignored `public/assets/` and `public/maps/`.
+The Windows installer never runs. A no answer leaves browser preparation available
+after `npm ci`. Run `npm run assets:setup` later to prepare assets without the prompt.
+
+To receive the question during **future** clones, use the Git template from an
+existing checkout:
+
+```sh
+git -c init.templateDir=/absolute/path/to/rustalarm/.git-template clone git@github.com:xinbenlv/rustalarm.git
+```
+
+Git copies the template hook before checkout. The hook prompts only in an
+interactive terminal. The regular `npm run repo:hooks` command also enables the
+same prompt on later branch checkouts in an existing clone. The `_3p/` installer
+and converted assets persist across local starts, so `npm run dev` reuses them.
+
 ## Play
 
 [Play the published version](https://xinbenlv.github.io/ra2-gpt-6-astra-2026-09-04/).

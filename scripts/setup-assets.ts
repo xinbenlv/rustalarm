@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +13,12 @@ import { configureMapData } from '../src/maps';
 
 export const SOURCE_URL = 'https://archive.org/download/red-alert-2-multiplayer/Red-Alert-2-Multiplayer.exe';
 export const SOURCE_SHA256 = '5388c54d7d7b73060083563ff1926bca0d2663a76678b807e23e9a8d491441ce';
+export const SOURCE_BYTES = 206530229;
 export const ASSET_VERSION = 1;
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configuredPath = (key: string, fallback: string): string => path.resolve(projectRoot, process.env[key] || fallback);
 const publicDirectory = (): string => configuredPath('RA2_PUBLIC_DIR', 'public');
+const cacheDirectory = (): string => configuredPath('RA2_ASSET_CACHE', '_3p');
 
 export interface AssetReadiness {
   ready: boolean;
@@ -130,10 +133,32 @@ async function downloadInstaller(cache: string): Promise<string> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  const explicit = process.env.RA2_LOCAL_INSTALLER;
+  const candidates = explicit ? [path.resolve(explicit)] : [
+    path.join(cache, 'Red-Alert-2-Multiplayer.exe'),
+    path.join(projectRoot, '.cache/ra2-assets/ra2-installer.exe'),
+    path.join(homedir(), 'Downloads/Red-Alert-2-Multiplayer.exe'),
+  ];
+  for (const candidate of candidates) {
+    const info = await fs.stat(candidate).catch(() => undefined);
+    if (info?.isFile() && info.size === SOURCE_BYTES && await sha256(candidate) === SOURCE_SHA256) {
+      const partial = target + '.part';
+      try {
+        await fs.copyFile(candidate, partial);
+        await fs.rename(partial, target);
+      } catch (error) {
+        await fs.rm(partial, { force: true });
+        throw error;
+      }
+      progress('download', '已校验并复用本地安装包，无需重新下载。', 100);
+      return target;
+    }
+    if (explicit) throw new Error(`RA2_LOCAL_INSTALLER does not match the expected installer: ${candidate}`);
+  }
   progress('download', '正在从 Internet Archive 下载原版素材（约 207 MB）。', 0);
   const response = await fetch(SOURCE_URL, { signal: AbortSignal.timeout(30 * 60 * 1000) });
   if (!response.ok || !response.body) throw new Error(`Internet Archive download failed: HTTP ${response.status}. Retry npm run assets:setup when the archive is reachable.`);
-  const total = Number(response.headers.get('content-length')) || 206530229;
+  const total = Number(response.headers.get('content-length')) || SOURCE_BYTES;
   let received = 0, lastUpdate = 0;
   const counter = new Transform({ transform(chunk: Buffer, _encoding, callback) {
     received += chunk.length;
@@ -174,10 +199,11 @@ async function install(): Promise<void> {
     return;
   }
   const destination = publicDirectory();
+  if (!args.has('--check')) await fs.mkdir(cacheDirectory(), { recursive: true });
   if (args.has('--sidebar-only')) {
     const base = await checkAssetsReady(destination, false);
     if (!base.ready) throw new Error('Sidebar-only upgrade needs complete existing originals. Run the full setup first.');
-    const cache = configuredPath('RA2_ASSET_CACHE', '.cache/ra2-assets');
+    const cache = cacheDirectory();
     const python = process.env.RA2_PYTHON || path.join(cache, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
     await run(python, ['scripts/assets/export_sidebar.py'], {...process.env, RA2_ASSET_CACHE:cache, RA2_PUBLIC_DIR:destination});
     const upgraded = await checkAssetsReady(destination);
@@ -206,7 +232,7 @@ async function install(): Promise<void> {
     const missing = [!sevenZip && '7-Zip (7zz/7z)', !ffmpeg && 'FFmpeg', !python && 'Python 3.10+'].filter(Boolean).join(', ');
     throw new Error(`Missing required tools: ${missing}.\nmacOS: brew install sevenzip ffmpeg python uv\nDebian/Ubuntu: sudo apt install 7zip ffmpeg python3 python3-venv\nWindows: install Python, FFmpeg and 7-Zip, then add their executable folders to PATH (or set RA2_PYTHON, RA2_FFMPEG, RA2_7ZIP).\nThen retry npm run assets:setup.`);
   }
-  const cache = configuredPath('RA2_ASSET_CACHE', '.cache/ra2-assets');
+  const cache = cacheDirectory();
   await fs.mkdir(cache, { recursive: true });
   const lockPath = path.join(cache, 'setup.lock');
   let lock;

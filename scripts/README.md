@@ -3,6 +3,9 @@
 Scripts prepare local originals, check publication boundaries and exercise the UI.
 Original outputs and browser evidence stay ignored.
 
+`prepare-local-assets.sh` creates ignored `_3p/` and asks before native setup.
+The Git template invokes this script on an interactive clone checkout.
+
 ```text
 assets/ + setup-assets.ts -> local optional extraction / conversion
 maps/                    -> map conversion and native-map tests

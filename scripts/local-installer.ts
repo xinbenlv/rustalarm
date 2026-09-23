@@ -15,6 +15,7 @@ export async function findLocalInstaller(roots:string[], explicit?:string):Promi
     candidates.push(...names.map(name=>path.join(root,name)));
     const cache=path.join(root,'.cache');
     candidates.push(...names.map(name=>path.join(cache,name)));
+    candidates.push(...names.map(name=>path.join(root,'_3p',name)));
     // Existing converter/upload caches are one directory deep; never scan the whole disk.
     const entries=await readdir(cache,{withFileTypes:true}).catch(()=>[]);
     for(const entry of entries.sort((a,b)=>a.name.localeCompare(b.name)))

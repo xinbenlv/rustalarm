@@ -10,5 +10,5 @@ def configured_path(variable, default):
     return value.resolve() if value.is_absolute() else (PROJECT_ROOT / value).resolve()
 
 
-ASSET_CACHE = configured_path('RA2_ASSET_CACHE', PROJECT_ROOT / '.cache/ra2-assets')
+ASSET_CACHE = configured_path('RA2_ASSET_CACHE', PROJECT_ROOT / '_3p')
 PUBLIC_DIR = configured_path('RA2_PUBLIC_DIR', PROJECT_ROOT / 'public')

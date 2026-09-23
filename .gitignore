@@ -6,6 +6,7 @@
 
 # Downloaded archives, extracted originals, and local caches.
 /.cache/
+/_3p/
 *.mix
 *.map
 *.mpr

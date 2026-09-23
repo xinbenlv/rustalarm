@@ -1,0 +1,7 @@
+#!/bin/sh
+# A preinstalled Git template can invoke this on the initial clone checkout.
+[ "$3" = 1 ] || exit 0
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -f "$root/scripts/prepare-local-assets.sh" ] || exit 0
+sh "$root/scripts/prepare-local-assets.sh"
+exit 0

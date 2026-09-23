@@ -27,6 +27,9 @@ test('local detection finds a shared checkout cache, checks size and honors an e
   assert.equal(await findLocalInstaller([root]),undefined,'partial installers do not advertise a ready local copy');
   await rm(filename);await mkdir(filename);
   assert.equal(await findLocalInstaller([root]),undefined,'a directory is never an installer');
+  const archive=path.join(root,'_3p','ra2-installer.exe');await mkdir(path.dirname(archive));
+  const local=await open(archive,'w');await local.truncate(SOURCE_BYTES);await local.close();
+  assert.equal(await findLocalInstaller([root]),archive,'the ignored _3p installer is reusable');
 });
 
 test('local access rejects remote sockets, foreign origins, host rebinding and ordinary link requests',()=>{
