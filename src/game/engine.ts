@@ -395,6 +395,20 @@ export class GameEngine {
     return undefined;
   }
 
+  setRallyPoint(ids: number[], x: number, y: number, owner: number): number {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || this.terrainAt(x, y) === 'void') return 0;
+    let updated = 0;
+    for (const id of ids) {
+      const e = this.getEntity(id);
+      if (!e || e.hp <= 0 || e.owner !== owner || e.kind !== 'building') continue;
+      const producer = getDefinition(e.type).producer;
+      if (!producer || producer === 'structure') continue;
+      e.rallyPoint = { x, y };
+      updated++;
+    }
+    return updated;
+  }
+
   commandMove(ids: number[], x: number, y: number, attackMove = false, append = false): void {
     const movable = ids.map(id => this.getEntity(id)).filter((e): e is Entity => !!e && e.kind === 'unit' && !e.transportedBy);
     const columns = Math.ceil(Math.sqrt(movable.length));
@@ -634,8 +648,9 @@ export class GameEngine {
         if (!pos) continue;
         const e = this.spawnEntity(d.id, p.id, pos.x, pos.y);
         p.queues[category].shift(); p.unitsBuilt++;
-        if (!d.harvest && factory && !this.bootcamp) {
-          const rally = this.nearestPassable({ x: factory.x + 4, y: factory.y + 5 }, d);
+        const rallyPoint = factory?.rallyPoint ?? (factory && !d.harvest && !this.bootcamp ? { x: factory.x + 4, y: factory.y + 5 } : undefined);
+        if (rallyPoint) {
+          const rally = this.nearestPassable(rallyPoint, d);
           this.setOrder(e, { kind: 'move', x: rally.x, y: rally.y });
         }
         this.event(`${d.name}训练完成。`, p.id, 'complete');

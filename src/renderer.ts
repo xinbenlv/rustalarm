@@ -202,11 +202,18 @@ export class BattlefieldRenderer {
     }
     const p = this.screenToTile(x, y), entity = this.pick(x, y);
     if (!this.selection.size) return;
-    if (entity) {
-      this.game.commandAttack([...this.selection], entity.id); this.marker({ x: entity.x, y: entity.y }, true);
-    } else { this.game.commandMove([...this.selection], p.x, p.y, false, this.planningMode); this.marker(p, false); }
-    const enemy=entity && this.game.players.find(v=>v.id===entity.owner)?.team!==this.game.players.find(v=>v.id===this.localId)?.team;
-    this.hooks.onCommand(enemy?'attack':'move');
+    const ids = [...this.selection];
+    const rallyCount = this.game.setRallyPoint(ids, p.x, p.y, this.localId);
+    const units = ids.filter(id => this.game.getEntity(id)?.kind === 'unit');
+    if (units.length) {
+      if (entity) {
+        this.game.commandAttack(units, entity.id); this.marker({ x: entity.x, y: entity.y }, true);
+      } else { this.game.commandMove(units, p.x, p.y, false, this.planningMode); this.marker(p, false); }
+    } else if (rallyCount) this.marker(p, false);
+    if (units.length || rallyCount) {
+      const enemy=entity && this.game.players.find(v=>v.id===entity.owner)?.team!==this.game.players.find(v=>v.id===this.localId)?.team;
+      this.hooks.onCommand(units.length && enemy?'attack':'move');
+    }
   }
   marker(p: Point, attack: boolean) { this.orderMarker = { ...p, age: 0, attack }; }
   pick(x: number, y: number): Entity | undefined {
@@ -344,7 +351,14 @@ export class BattlefieldRenderer {
   private drawRoutes() {
     const ctx=this.ctx;ctx.save();ctx.strokeStyle='#ffff00';ctx.fillStyle='#ffff00';ctx.lineWidth=1;ctx.font='11px Tahoma';ctx.setLineDash([4,4]);
     for(const entity of this.game.entities) {
-      if(!this.selection.has(entity.id)||entity.owner!==this.localId||entity.hp<=0||(!this.planningMode&&!entity.waypoints?.length))continue;
+      if(!this.selection.has(entity.id)||entity.owner!==this.localId||entity.hp<=0)continue;
+      if (entity.kind === 'building' && entity.rallyPoint) {
+        const from = this.toScreen(entity.x, entity.y), to = this.toScreen(entity.rallyPoint.x, entity.rallyPoint.y);
+        ctx.beginPath();ctx.moveTo(from.x, from.y);ctx.lineTo(to.x, to.y);ctx.stroke();
+        ctx.strokeRect(to.x-4,to.y-4,8,8);
+        continue;
+      }
+      if(!this.planningMode&&!entity.waypoints?.length)continue;
       if(entity.order.kind!=='move'&&entity.order.kind!=='attackMove')continue;
       const points=[entity,entity.order,...entity.waypoints||[]].map(p=>this.toScreen(p.x,p.y));
       ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();

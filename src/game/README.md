@@ -36,3 +36,7 @@ avoids an unrelated engine rewrite during this integration.
 advances the queue; ordinary orders, stop, deployment and boarding cancel it.
 The renderer draws routes from this shared state in either presentation. Player
 colors use the original rules.ini HSV values and multiplayer ordering.
+
+Selected infantry, vehicle, aircraft and naval producers accept a map right-click
+as a rally point. Newly produced units move to a passable cell near that point.
+Without a rally point, skirmish units retain the existing nearby exit behavior.

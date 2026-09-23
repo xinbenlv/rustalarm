@@ -48,6 +48,31 @@ test('deployment, technology prerequisites, paid construction, placement, and un
   assert.equal(engine.getPlayer(0)!.queues.infantry.length, 0);
 });
 
+test('production buildings send new units to their selected rally points', () => {
+  const engine = game();
+  const barracks = engine.spawnEntity('barracks', 0, 18.5, 8.5);
+  const factory = engine.spawnEntity('war_factory', 0, 26.5, 8.5);
+  const enemy = engine.spawnEntity('soviet_barracks', 1, 45.5, 45.5);
+  assert.equal(engine.setRallyPoint([enemy.id, barracks.id, factory.id], 32, 20, 0), 2);
+  assert.deepEqual(barracks.rallyPoint, { x: 32, y: 20 });
+  assert.deepEqual(factory.rallyPoint, { x: 32, y: 20 });
+  assert.equal(enemy.rallyPoint, undefined);
+  assert.equal(engine.setRallyPoint([barracks.id], -1, 20, 0), 0);
+  assert.deepEqual(barracks.rallyPoint, { x: 32, y: 20 });
+  engine.setDebugInstantProduction(true);
+  assert.ok(engine.build(0, 'gi'));
+  assert.ok(engine.build(0, 'grizzly'));
+  const gi = engine.entities.find(e => e.type === 'gi' && e.owner === 0)!;
+  const tank = engine.entities.find(e => e.type === 'grizzly' && e.owner === 0)!;
+  assert.deepEqual(gi.order, { kind: 'move', x: 32.5, y: 20.5 });
+  assert.deepEqual(tank.order, { kind: 'move', x: 32.5, y: 20.5 });
+  assert.equal(engine.setRallyPoint([barracks.id], 38, 22, 0), 1);
+  assert.ok(engine.build(0, 'gi'));
+  const nextGi = engine.entities.filter(e => e.type === 'gi' && e.owner === 0).at(-1)!;
+  assert.deepEqual(nextGi.order, { kind: 'move', x: 38.5, y: 22.5 });
+  assert.deepEqual(gi.order, { kind: 'move', x: 32.5, y: 20.5 });
+});
+
 test('canceling a queued item refunds exactly its paid cost', () => {
   const engine = game(); deploy(engine);
   const before = engine.getPlayer(0)!.credits;
