@@ -240,7 +240,7 @@ function openMapChooser(){
     choose:useLobbyMap,cancel:closeModal,upload:input=>void uploadLobbyMap(input)});
 }
 function showHelp(){
-  showModal('作战操作',`<div class="help-grid"><kbd>左键 / 框选</kbd><span>选中己方单位；按住 Shift 增减选择。</span><kbd>右键</kbd><span>移动部队，点击敌军发动攻击；取消建筑放置。</span><kbd>双击基地车 / D</kbd><span>部署基地车。大兵与辐射工兵也可部署。</span><kbd>建造图标</kbd><span>点击开始生产，建筑就绪后点击图标并放置。</span><kbd>右击建造图标</kbd><span>取消该类生产队列中的一个项目。</span><kbd>方向键 / 鼠标边缘</kbd><span>移动视角。也可中键拖动或按住空格拖动。</span><kbd>滚轮</kbd><span>缩放战场。</span><kbd>Alt + 左键拖动（3D）</kbd><span>旋转三维视角。</span><kbd>H / 雷达点击</kbd><span>返回基地 / 快速移动视角。</span><kbd>A → 左键</kbd><span>攻击移动，沿途交战。</span><kbd>S / G</kbd><span>停止 / 警戒。</span><kbd>Ctrl + 1–9</kbd><span>建立编队，数字键选择编队。</span><kbd>Tab</kbd><span>切换建造分类。</span><kbd>Esc / P</kbd><span>取消当前命令 / 暂停与选项。</span></div>`,`<button id="help-close" class="primary">收到</button>`);$('#help-close').onclick=closeModal;
+  showModal('作战操作',`<div class="help-grid"><kbd>左键 / 框选</kbd><span>选中己方单位；按住 Shift 增减选择。</span><kbd>右键</kbd><span>移动部队，点击敌军发动攻击；取消建筑放置。</span><kbd>生产建筑 + 右键</kbd><span>选中兵营、战车工厂等生产建筑，再右键点击地图设置出兵目的地。</span><kbd>双击基地车 / D</kbd><span>部署基地车。大兵与辐射工兵也可部署。</span><kbd>建造图标</kbd><span>点击开始生产，建筑就绪后点击图标并放置。</span><kbd>右击建造图标</kbd><span>取消该类生产队列中的一个项目。</span><kbd>方向键 / 鼠标边缘</kbd><span>移动视角。也可中键拖动或按住空格拖动。</span><kbd>滚轮</kbd><span>缩放战场。</span><kbd>Alt + 左键拖动（3D）</kbd><span>旋转三维视角。</span><kbd>H / 雷达点击</kbd><span>返回基地 / 快速移动视角。</span><kbd>A → 左键</kbd><span>攻击移动，沿途交战。</span><kbd>S / G</kbd><span>停止 / 警戒。</span><kbd>Ctrl + 1–9</kbd><span>建立编队，数字键选择编队。</span><kbd>Tab</kbd><span>切换建造分类。</span><kbd>Esc / P</kbd><span>取消当前命令 / 暂停与选项。</span></div>`,`<button id="help-close" class="primary">收到</button>`);$('#help-close').onclick=closeModal;
 }
 async function startGame(){
   try{
