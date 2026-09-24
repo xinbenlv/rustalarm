@@ -4,6 +4,8 @@
 ```text
 game-guide.md                  gameplay, assets and editor
 save-games.md                  save controls, format and regression checks
+production-verification.md     airfield, production availability and notification regression checks
+combat-fidelity-comparison.md  光棱、战机和支援界面的代码对照与剩余差异
 verification.md                earlier application acceptance
 bootcamp*-verification.md      model switching, terrain and training
 sidebar-verification.md        native faction chrome and production

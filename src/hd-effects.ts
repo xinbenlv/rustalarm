@@ -1,30 +1,25 @@
+import { drawWeaponShot } from './weapon-effects';
 import {unitIsMoving} from './sprite-animation';
 import type { Entity, Effect, Point } from './game/types';
 import type { GameEngine } from './game/engine';
+import type { Assets } from './assets';
 
 function glow(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, color: string) {
   const g=ctx.createRadialGradient(x,y,0,x,y,radius);g.addColorStop(0,'#fff7d5');g.addColorStop(.25,color);g.addColorStop(1,'transparent');
   ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
 }
 /** Resolution-independent effects drawn inside the engine's world transform. */
-export function drawHDCombatEffect(ctx: CanvasRenderingContext2D, effect: Effect, p: Point, game: GameEngine, project: (x:number,y:number)=>Point): boolean {
+export function drawHDCombatEffect(ctx: CanvasRenderingContext2D, effect: Effect, p: Point, game: GameEngine, project: (x:number,y:number)=>Point, assets?: Assets): boolean {
   if(!['shot','hit','explosion','nuke'].includes(effect.kind))return false;
   const t=Math.min(1,effect.age/effect.duration);ctx.save();
   if(effect.kind==='shot'&&effect.toX!=null&&effect.toY!=null){
-    const q=project(effect.toX,effect.toY),source=game.getEntity(effect.sourceId??-1);
-    const infantry=source?.type==='tanya',height=infantry?18:17;
-    const dx=q.x-p.x,dy=q.y-p.y,length=Math.max(1,Math.hypot(dx,dy)),ux=dx/length,uy=dy/length;
-    const sx=p.x+ux*(infantry?5:24),sy=p.y-height+uy*(infantry?5:24),ex=q.x,ey=q.y-12;
-    if(t<.42){ctx.globalAlpha=1-t/.42;glow(ctx,sx,sy,infantry?8:19,'#ffb743');}
-    ctx.globalAlpha=1-t*.65;ctx.lineCap='round';
-    const head=Math.min(1,t*1.3),tail=Math.max(0,head-(infantry?.13:.08));
-    ctx.strokeStyle='#ff9b35';ctx.lineWidth=infantry?2:4;ctx.shadowColor='#ffb73b';ctx.shadowBlur=8;
-    ctx.beginPath();ctx.moveTo(sx+(ex-sx)*tail,sy+(ey-sy)*tail);ctx.lineTo(sx+(ex-sx)*head,sy+(ey-sy)*head);ctx.stroke();
-    ctx.shadowBlur=0;ctx.strokeStyle='#fff7cd';ctx.lineWidth=1;ctx.stroke();
+    const q=project(effect.toX,effect.toY);
+    drawWeaponShot(ctx,effect,{x:p.x,y:p.y-(effect.fromHeight??12)},{x:q.x,y:q.y-(effect.toHeight??6)},1,assets);
   }else if(effect.kind==='hit'){
     ctx.globalAlpha=1-t;glow(ctx,p.x,p.y-14,5+t*13,'#ffc35c');
     for(let i=0;i<7;i++){const a=i*2.399+effect.id;const r=3+t*(12+i*2);ctx.strokeStyle=i%2?'#fff1a4':'#e9914c';ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(p.x+Math.cos(a)*r*.55,p.y-14+Math.sin(a)*r*.4);ctx.lineTo(p.x+Math.cos(a)*r,p.y-14+Math.sin(a)*r*.7+t*t*10);ctx.stroke();}
   }else{
+    p = { x: p.x, y: p.y - (effect.fromHeight ?? 0) };
     const radius=effect.kind==='nuke'?140:effect.radius&&effect.radius>1?65:26;
     ctx.globalAlpha=1-t;glow(ctx,p.x,p.y-12,Math.max(2,radius*Math.sin(Math.min(1,t*2)*Math.PI/2)),'#f17b25');
     ctx.strokeStyle='#ffd094';ctx.lineWidth=2*(1-t);ctx.beginPath();ctx.ellipse(p.x,p.y,radius*t*1.5,radius*t*.65,0,0,Math.PI*2);ctx.stroke();

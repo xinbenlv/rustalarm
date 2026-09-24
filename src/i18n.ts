@@ -12,6 +12,10 @@ let locale: Locale = detectLocale(savedLocale, typeof window !== 'undefined' ? (
 
 /** Source messages remain Chinese in the simulation; localization happens at the presentation boundary. */
 const english: Record<string, string> = {
+  '光棱塔需要供电。附近的己方光棱塔聚光后增强攻击。':'Prism Towers require power. Nearby towers owned by the same player strengthen the attack with support beams.',
+  '飞机名额已满':'Aircraft capacity reached',
+  '已达到建造上限':'Build limit reached',
+  '舰炮攻击海面与岸上目标，舰载机执行反潜攻击。':'Naval guns attack surface and shore targets. Aircraft attack submarines.',
   '正在读取原版战场资料':'Loading original battlefield data',
   '遭遇战':'Skirmish', '本地战场已就绪':'Battlefield ready', '音效':'Sound', '操作说明':'Controls',
   '战场情报':'Battlefield Intelligence', '北极圈原版地图预览':'Original map preview', '选择地图 ▸':'Select Map ▸',

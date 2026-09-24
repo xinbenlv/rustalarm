@@ -48,35 +48,64 @@ test('deployment, technology prerequisites, paid construction, placement, and un
   assert.equal(engine.getPlayer(0)!.queues.infantry.length, 0);
 });
 
-test('fighters occupy airfield pads and wait when all pads are full', () => {
-  const engine = game();
-  engine.spawnEntity('construction_yard', 0, 12, 12);
-  engine.spawnEntity('soviet_construction_yard', 1, 51, 51);
+test('four aircraft slots per airfield count flying aircraft and the paid queue', () => {
+  const engine = game({ startingCredits: 50000 }); deploy(engine);
   engine.spawnEntity('power_plant', 0, 18, 12);
   engine.spawnEntity('airforce_command', 0, 25.5, 25);
-  const pads = [
-    { x: 24.8, y: 24.45 }, { x: 26.2, y: 24.45 },
-    { x: 24.8, y: 25.55 }, { x: 26.2, y: 25.55 },
-  ];
-  for (const pad of pads) {
-    assert.ok(engine.build(0, 'harrier'));
-    advance(engine, CATALOG.harrier.buildTime + 1);
-    const fighter = engine.entities.filter(e => e.type === 'harrier')[pads.indexOf(pad)];
-    assert.ok(fighter, `pad ${pads.indexOf(pad)}: ${engine.status}, ${JSON.stringify(engine.getPlayer(0)!.queues.aircraft)}`);
-    assert.ok(Math.hypot(fighter.x - pad.x, fighter.y - pad.y) < .01);
-    assert.equal(fighter.order.kind, 'idle');
-  }
+  for (let i = 0; i < 4; i++) assert.ok(engine.build(0, 'harrier'));
+  const credits = engine.getPlayer(0)!.credits;
+  assert.equal(engine.build(0, 'harrier'), false);
+  assert.equal(engine.getBuildReason(0, 'harrier'), '飞机名额已满');
+  assert.equal(engine.getPlayer(0)!.credits, credits);
+  assert.ok(engine.cancelBuild(0, 'aircraft'));
   assert.ok(engine.build(0, 'harrier'));
-  advance(engine, CATALOG.harrier.buildTime + 1);
-  assert.equal(engine.entities.filter(e => e.type === 'harrier').length, 4);
-  assert.equal(engine.getPlayer(0)!.queues.aircraft.length, 1);
+  engine.setDebugInstantProduction(true);
+  const fighters = engine.ownEntities(0).filter(e => e.type === 'harrier');
+  assert.deepEqual(fighters.map(e => ({ x: e.x, y: e.y })), [
+    { x: 25.5, y: 24.5 }, { x: 25.5, y: 25.5 },
+    { x: 26.5, y: 24.5 }, { x: 26.5, y: 25.5 },
+  ]);
+  for (const fighter of fighters) assert.equal(fighter.order.kind, 'idle');
+  engine.commandMove(fighters.map(e => e.id), 12, 32);
+  advance(engine, 4);
+  assert.ok(fighters.every(e => e.x < 20));
+  assert.equal(engine.canBuild(0, 'harrier'), false, 'Takeoff keeps all four slots occupied');
+  const restored = GameEngine.fromSnapshot(engine.captureSnapshot());
+  assert.equal(restored.canBuild(0, 'harrier'), false, 'Save restoration retains flying aircraft capacity');
+  engine.spawnEntity('airforce_command', 1, 40.5, 30);
+  assert.equal(engine.canBuild(0, 'harrier'), false, 'Enemy airports do not add capacity');
+  const second = engine.spawnEntity('airforce_command', 0, 34.5, 25);
+  assert.deepEqual(engine.aircraftCapacity(0), { capacity: 8, used: 4 });
+  for (let i = 0; i < 4; i++) assert.ok(engine.build(0, 'harrier'));
+  assert.equal(engine.canBuild(0, 'harrier'), false);
+  fighters[0].hp = 0;
+  assert.equal(engine.canBuild(0, 'harrier'), true, 'Aircraft loss frees a slot');
+  assert.ok(engine.sell(second.id));
+  assert.equal(engine.canBuild(0, 'harrier'), false, 'Selling an airport removes four slots');
+});
 
-  const secondAirfield = engine.spawnEntity('airforce_command', 0, 34.5, 25);
+test('mixed fighters share capacity and queued aircraft wait after an airfield loss', () => {
+  const engine = game({ startingCredits: 50000, players: [
+    { id: 0, name: 'Player', country: 'korea', team: 0 },
+    { id: 1, name: 'CPU', country: 'russia', team: 0 },
+  ] }); deploy(engine);
+  engine.spawnEntity('airforce_command', 0, 25.5, 25);
+  const second = engine.spawnEntity('airforce_command', 0, 34.5, 25);
+  engine.setDebugInstantProduction(true);
+  for (const type of ['harrier', 'black_eagle', 'harrier', 'black_eagle']) assert.ok(engine.build(0, type));
+  engine.commandMove(engine.ownEntities(0).filter(e => e.type === 'harrier' || e.type === 'black_eagle').map(e => e.id), 12, 32);
+  advance(engine, 4);
+  engine.setDebugInstantProduction(false);
+  assert.ok(engine.build(0, 'black_eagle'));
+  second.hp = 0;
+  engine.setDebugInstantProduction(true);
   advance(engine, 1);
-  const fifth = engine.entities.filter(e => e.type === 'harrier')[4];
-  assert.ok(fifth);
-  assert.ok(Math.abs(fifth.x - secondAirfield.x) < 1.5);
-  assert.ok(Math.abs(fifth.y - secondAirfield.y) < 1);
+  assert.equal(engine.aircraftCapacity(0).used, 4);
+  assert.equal(engine.getPlayer(0)!.queues.aircraft.length, 1);
+  const fighter = engine.ownEntities(0).find(e => e.type === 'harrier')!;
+  fighter.hp = 0;
+  advance(engine, 1);
+  assert.equal(engine.aircraftCapacity(0).used, 4);
   assert.equal(engine.getPlayer(0)!.queues.aircraft.length, 0);
 });
 
@@ -90,25 +119,39 @@ test('canceling a queued item refunds exactly its paid cost', () => {
   assert.equal(engine.getPlayer(0)!.queues.structure.length, 0);
 });
 
-test('a skirmish player can keep only one active building of each type', () => {
+test('ordinary buildings remain available for repeated placement', () => {
   const engine = game(); deploy(engine);
   engine.setDebugInstantProduction(true);
-  assert.ok(engine.build(0, 'power_plant'));
-  assert.ok(engine.place(0, 'power_plant', 17, 10));
-  const plant = engine.ownEntities(0).find(e => e.type === 'power_plant')!;
-  const credits = engine.getPlayer(0)!.credits;
-  assert.equal(engine.canBuild(0, 'power_plant'), false);
-  assert.equal(engine.getBuildReason(0, 'power_plant'), '该建筑已建造');
-  assert.equal(engine.getAvailable(0, 'structure').some(d => d.id === 'power_plant'), false);
-  assert.equal(engine.build(0, 'power_plant'), false);
-  assert.equal(engine.getPlayer(0)!.credits, credits);
-  assert.ok(engine.build(0, 'barracks'));
-  assert.ok(engine.place(0, 'barracks', 18, 6));
-  assert.ok(engine.build(0, 'pillbox'));
-  assert.ok(engine.place(0, 'pillbox', 20, 9));
-  assert.equal(engine.canBuild(0, 'pillbox'), false, 'defenses follow the same limit');
-  assert.ok(engine.sell(plant.id));
-  assert.equal(engine.canBuild(0, 'power_plant'), true, 'lost buildings can be replaced');
+  for (const [type, x, y] of [
+    ['power_plant', 17, 10], ['power_plant', 20, 10],
+    ['barracks', 18, 6], ['pillbox', 22, 9], ['pillbox', 22, 11],
+  ] as const) {
+    assert.ok(engine.build(0, type), type);
+    assert.ok(engine.place(0, type, x, y), engine.lastMessage);
+    assert.equal(engine.canBuild(0, type), true);
+    assert.ok(engine.getAvailable(0).some(d => d.id === type));
+  }
+  assert.equal(engine.ownEntities(0).filter(e => e.type === 'power_plant').length, 2);
+  assert.equal(engine.ownEntities(0).filter(e => e.type === 'pillbox').length, 2);
+});
+
+for (const [country, tech, types] of [
+  ['america', 'battle_lab', ['chronosphere', 'weather_control']],
+  ['russia', 'soviet_battle_lab', ['iron_curtain', 'nuclear_silo']],
+] as const) test(`${country} superweapons retain a one-building limit and allow rebuilding`, () => {
+  const engine = game({ players: [{ id: 0, name: 'Player', country, team: 0 }] }); deploy(engine);
+  engine.spawnEntity(tech, 0, 17, 12);
+  engine.setDebugInstantProduction(true);
+  for (const type of types) {
+    assert.ok(engine.build(0, type));
+    assert.ok(engine.place(0, type, 22, 12), engine.lastMessage);
+    assert.equal(engine.canBuild(0, type), false);
+    assert.equal(engine.getAvailable(0).some(d => d.id === type), true);
+    assert.equal(engine.build(0, type), false);
+    assert.equal(engine.getPlacementReason(0, type, 28, 12), '已达到建造上限');
+    assert.ok(engine.sell(engine.ownEntities(0).find(e => e.type === type)!.id));
+    assert.equal(engine.canBuild(0, type), true);
+  }
 });
 
 test('a placed weather controller charges its support and pauses without power', () => {
@@ -119,11 +162,11 @@ test('a placed weather controller charges its support and pauses without power',
   assert.ok(engine.build(0, 'weather_control'));
   assert.ok(engine.place(0, 'weather_control', 22, 12), engine.lastMessage);
   const support = () => engine.getSupport(0).find(ability => ability.id === 'lightning')!;
-  assert.equal(support().total, 240);
-  assert.equal(support().remaining, 240);
+  assert.equal(support().total, 600);
+  assert.equal(support().remaining, 600);
   assert.equal(support().ready, false);
   advance(engine, 1);
-  assert.ok(support().remaining < 240);
+  assert.ok(support().remaining < 600);
   const remaining = support().remaining;
   for (const plant of plants) assert.ok(engine.sell(plant.id));
   advance(engine, 1);
@@ -131,9 +174,22 @@ test('a placed weather controller charges its support and pauses without power',
   assert.equal(support().ready, false);
   engine.spawnEntity('power_plant', 0, 6, 8);
   engine.spawnEntity('power_plant', 0, 9, 8);
-  advance(engine, 240);
+  advance(engine, 600);
   assert.equal(support().remaining, 0);
   assert.equal(support().ready, true);
+});
+
+test('a second airfield preserves the active paradrop countdown', () => {
+  const engine = game(); deploy(engine);
+  engine.spawnEntity('refinery', 0, 17, 12);
+  engine.setDebugInstantProduction(true);
+  assert.ok(engine.build(0, 'airforce_command'));
+  assert.ok(engine.place(0, 'airforce_command', 22, 12));
+  engine.getPlayer(0)!.abilityCooldowns.paradrop = 12;
+  assert.ok(engine.build(0, 'airforce_command'));
+  assert.ok(engine.place(0, 'airforce_command', 26, 12));
+  assert.equal(engine.getPlayer(0)!.abilityCooldowns.paradrop, 12);
+  assert.equal(engine.aircraftCapacity(0).capacity, 8);
 });
 
 test('debug credits can be added and removed independently for each side', () => {

@@ -1,5 +1,6 @@
 /** Download and convert original RA2 data. The Windows installer is never run. */
 import { missingNativeUiAssets, MENU_VIDEO_PATH } from '../src/hud/skin';
+import { missingCombatAssets } from '../src/combat-assets';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -32,7 +33,7 @@ export interface AssetReadiness {
 }
 
 /** Validate metadata and every referenced image, native map and sound; no mutations. */
-export async function checkAssetsReady(publicDir = publicDirectory(), requireSidebar = true): Promise<AssetReadiness> {
+export async function checkAssetsReady(publicDir = publicDirectory(), requireSidebar = true, requireBuildingLayers = true): Promise<AssetReadiness> {
   const missing: string[] = [];
   const files = new Set<string>(requireSidebar?[MENU_VIDEO_PATH.slice(1)]:[]);
   const documents = new Map<string, unknown>();
@@ -53,8 +54,17 @@ export async function checkAssetsReady(publicDir = publicDirectory(), requireSid
   if (requireSidebar) for (const key of missingNativeUiAssets(record(manifest.ui))) missing.push(`assets/manifest.json:ui.${key}`);
   if (record(manifest.source).sha256 !== SOURCE_SHA256) missing.push('assets/manifest.json:source.sha256');
   const sprites = record(manifest.sprites);
+  if (requireBuildingLayers) for (const key of missingCombatAssets({ cameos: record(manifest.cameos), sprites })) missing.push(`assets/manifest.json:${key}`);
+  if (requireBuildingLayers) for (const [base, part] of [['gaairc','aircbb'], ['gacsph','csph_e'], ['gaweth','weth_e'], ['nairon','iron_a'], ['namisl','misl_e']]) for (const suffix of ['', '-snow']) {
+    const name = base + suffix, layers = record(sprites[name]).originalLayers;
+    if (!Array.isArray(layers) || !layers.some(layer => String(layer).endsWith(`${part}.shp`))) missing.push(`assets/manifest.json:sprites.${name} ${part}`);
+  }
   for (const name of ['fv-turret0', 'fv-turret1', 'fv-turret2', 'fv-turret3']) {
     if (record(sprites[name]).frames !== 32) missing.push(`assets/manifest.json:sprites.${name}`);
+  }
+  if (requireBuildingLayers) for (const key of ['gagcan','nasam','nalasr','naflak']) for (const suffix of ['', '-snow']) {
+    const sprite = record(sprites[key + suffix]);
+    if (sprite.facings !== 32 || !Array.isArray(sprite.originalLayers) || !sprite.originalLayers.some(layer => String(layer).endsWith('.vxl'))) missing.push(`assets/manifest.json:sprites.${key + suffix} turret`);
   }
   for (const name of ['gi', 'cons', 'engineer', 'tany']) {
     if (Number(record(sprites[name]).frames) <= 80) missing.push(`assets/manifest.json:sprites.${name} complete infantry frames`);
@@ -206,13 +216,25 @@ async function writeReady(publicDir: string, checked: AssetReadiness): Promise<v
 
 async function install(): Promise<void> {
   const args = new Set(process.argv.slice(2));
-  for (const arg of args) if (!['--check', '--force', '--help', '--sidebar-only'].includes(arg)) throw new Error(`Unknown argument: ${arg}. Use --check, --force, --sidebar-only, or --help.`);
+  for (const arg of args) if (!['--check', '--force', '--help', '--sidebar-only', '--sprites-only'].includes(arg)) throw new Error(`Unknown argument: ${arg}. Use --check, --force, --sidebar-only, --sprites-only, or --help.`);
   if (args.has('--help')) {
-    console.log('Usage: npm run assets:setup [-- --force | --sidebar-only]\n       npm run assets:check\n\nDownloads the verified original archive and converts it locally without running Windows executables.\nRequires Python 3.10+, 7zz (or 7z), FFmpeg; uv is optional.\nOverrides: RA2_ASSET_CACHE, RA2_PUBLIC_DIR, RA2_PYTHON, RA2_7ZIP, RA2_FFMPEG.');
+    console.log('Usage: npm run assets:setup [-- --force | --sidebar-only | --sprites-only]\n       npm run assets:check\n\nDownloads the verified original archive and converts it locally without running Windows executables.\nRequires Python 3.10+, 7zz (or 7z), FFmpeg; uv is optional.\nOverrides: RA2_ASSET_CACHE, RA2_PUBLIC_DIR, RA2_PYTHON, RA2_7ZIP, RA2_FFMPEG.');
     return;
   }
   const destination = publicDirectory();
   if (!args.has('--check')) await fs.mkdir(cacheDirectory(), { recursive: true });
+  if (args.has('--sprites-only')) {
+    const base = await checkAssetsReady(destination, true, false);
+    if (!base.ready) throw new Error('Sprite upgrade needs complete existing originals. Run the full setup first.');
+    const cache = cacheDirectory();
+    const python = process.env.RA2_PYTHON || path.join(cache, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+    await run(python, ['scripts/assets/complete_sprites.py'], {...process.env, RA2_ASSET_CACHE:cache, RA2_PUBLIC_DIR:destination});
+    const upgraded = await checkAssetsReady(destination);
+    if (!upgraded.ready) throw new Error(`Sprite upgrade is incomplete: ${upgraded.missing.join(', ')}`);
+    await writeReady(destination, upgraded);
+    progress('complete', 'Original building layers upgraded.', 100);
+    return;
+  }
   if (args.has('--sidebar-only')) {
     const base = await checkAssetsReady(destination, false);
     if (!base.ready) throw new Error('Sidebar-only upgrade needs complete existing originals. Run the full setup first.');

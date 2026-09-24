@@ -96,5 +96,10 @@ upgrade refreshes these assets with their original palettes.
 manifest entry. Native FFmpeg or the browser worker encodes a muted VP8 WebM;
 the temporary Bink is deleted before outputs are stored. `RA2_FFMPEG` overrides
 the native executable. The video remains local original media, excluded from builds.
-Browser readiness schema 6 forces older caches through verified local preparation;
-the cached installer is reused without re-downloading.
+浏览器素材版本 9 要求建筑部件、支援图标和导弹。
+`prism_animation.py` 合成光棱塔的待机和充能帧。
+浏览器复用已验证的安装包重新转换素材。
+本地开发者可以运行 `npm run assets:setup -- --sprites-only`。
+素材命令复用已提取的文件，更新建筑图层和停机坪锚点。
+`building_turrets.py` 合成 32 个方向的炮塔和炮管。
+转换器保留静止 `SuperAnim`，不叠加互斥的充能状态。

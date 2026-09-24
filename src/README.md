@@ -32,3 +32,7 @@ fallback. Static sites retain the normal download and file picker flows.
 Several existing modules (`engine.ts`, CSS and the compact main UI templates) exceed
 the normal byte/line guideline. Their tightly coupled legacy state is retained for
 this integration; new render lifecycle/model code is split into Bootcamp and native sidebar code into `hud/`.
+
+`weapon-effects.ts` supplies distinct projectile and beam shapes for both views.
+`combat-assets.ts` 校验支援图标、导弹和光棱塔动画。
+Factories retain rally points; selected factories show a flag and connecting line.

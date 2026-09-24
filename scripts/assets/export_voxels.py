@@ -44,13 +44,13 @@ def decode(name):
    points.append((px,py,pz,color,nx,ny,nz))
  return points
 
-def export(name,raw=None,parts=None):
+def export(name,raw=None,parts=None,pal=None):
  raw=raw or name;points=[];files=[]
  for part in (parts or [raw,raw+'tur',raw+'barl']):
   ps=decode(part)
   if ps:points.extend(ps);files.append(part+'.vxl')
  if not points:return False
- pal=e.palette('unittem');N=32;S=200 if raw in ['zep','dred','carrier'] else 128;W=H=S;cols=8;sheet=Image.new('RGBA',(W*cols,H*4));maskSheet=Image.new('RGBA',sheet.size)
+ pal=pal or e.palette('unittem');N=32;S=200 if raw in ['zep','dred','carrier','gtgcantur'] else 128;W=H=S;cols=8;sheet=Image.new('RGBA',(W*cols,H*4));maskSheet=Image.new('RGBA',sheet.size)
  for frame in range(N):
   a=frame*math.tau/N;ca,sa=math.cos(a),math.sin(a);render=[]
   for x,y,z,c,nx,ny,nz in points:

@@ -35,7 +35,7 @@ try {
   await page.evaluate(async files=>{
     const cache=await caches.open('ra2-originals-v2');
     for(let i=files.length;i<3001;i++){const path=`/assets/test-padding-${i}`;files.push(path);await cache.put(path,new Response('fixture'));}
-    await cache.put('/assets/ready.json',Response.json({version:6,sourceSha256:'5388c54d7d7b73060083563ff1926bca0d2663a76678b807e23e9a8d491441ce',files,installedAt:new Date().toISOString()}));
+    await cache.put('/assets/ready.json',Response.json({version:8,sourceSha256:'5388c54d7d7b73060083563ff1926bca0d2663a76678b807e23e9a8d491441ce',files,installedAt:new Date().toISOString()}));
     for(const registration of await navigator.serviceWorker.getRegistrations())await registration.unregister();
   },files);
   await page.goto('about:blank');await page.goto(url);

@@ -3,6 +3,7 @@
 // menu encoding is split into its own module.
 import { convertMenuVideo } from './menu-video-converter';
 import { missingNativeUiAssets } from './hud/skin';
+import { missingCombatAssets } from './combat-assets';
 import SevenZip from '7z-wasm';
 import sevenWasm from '7z-wasm/7zz.wasm?url';
 import { scopedCache } from './urls';
@@ -111,6 +112,7 @@ async function install(localFile?: Blob) {
   for(const file of ['/assets/manifest.json','/assets/terrain/manifest-tiles.json','/assets/scenery/manifest-scenery.json','/maps/catalog.json']){const response=await cache.match(file);if(!response)throw new Error('Missing original metadata: '+file);collect(await response.json());}
   const manifest=await (await cache.match('/assets/manifest.json'))!.json();
   if(missingNativeUiAssets(manifest.ui || {}).length)throw new Error('UI conversion is incomplete. Please retry.');
+  if(missingCombatAssets(manifest).length)throw new Error('Combat asset conversion is incomplete. Please retry.');
   for(const map of listMaps())required.add('/maps/'+map.filename);
   if(files.length<3000 || ![...required].every(file=>keys.has(file)))throw new Error('Browser storage verification failed. Please retry.');
   await cache.put(READY_URL,Response.json({version:ORIGINAL_VERSION,sourceSha256:SOURCE_SHA256,files,installedAt:new Date().toISOString()}));

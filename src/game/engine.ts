@@ -3,21 +3,18 @@
 import { bootcampTypes, BOOTCAMP_CREDITS } from '../bootcamp/catalog.js';
 import { CATALOG, CATEGORIES, countryById, getDefinition, PLAYER_COLORS } from './data';
 import { findPath } from './pathfinding';
+import { aircraftPads, AIRCRAFT_DOCK_OFFSETS, assignAircraftDock, freeAircraftPad, AIRCRAFT_CRUISE_HEIGHT, AIRCRAFT_RELOAD_SECONDS, AIRCRAFT_CLIMB_SPEED, AIRCRAFT_ACCELERATION } from './aircraft';
 import { copySaveData, type EngineSnapshot } from './snapshot';
 import { validateEngineSnapshot } from './snapshot-validation';
+import { SUPPORT_ABILITIES as abilities } from './support';
+import { PRISM_CHARGE_SECONDS, PRISM_SUPPORT_MAX, PRISM_SUPPORT_MODIFIER, PRISM_SUPPORT_RANGE, PRISM_TOWER_HEIGHT } from './prism';
 import type { Definition, Effect, Entity, GameEvent, GameMap, GameOptions, Order, PlayerState, Point, ProductionCategory, Terrain } from './types';
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 const isTransport = (type: string) => !!CATALOG[type]?.transportCapacity;
 const ATTACK_WARNING_COOLDOWN = 60;
-const abilities: Record<string, { name: string; building?: string; duration: number }> = {
-  paradrop: { name: '空降部队', building: 'airforce_command', duration: 90 },
-  chronosphere: { name: '超时空传送', building: 'chronosphere', duration: 180 },
-  lightning: { name: '闪电风暴', building: 'weather_control', duration: 240 },
-  ironCurtain: { name: '铁幕装置', building: 'iron_curtain', duration: 180 },
-  nuke: { name: '核弹攻击', building: 'nuclear_silo', duration: 240 },
-};
+const SUPERWEAPON_BUILDINGS = new Set(['chronosphere', 'weather_control', 'iron_curtain', 'nuclear_silo']);
 
 /** Deterministic tile-space skirmish simulation, independent of rendering and DOM. */
 export class GameEngine {
@@ -280,10 +277,9 @@ export class GameEngine {
       if (d.neutral) return false;
       if (this.bootcamp) return bootcampTypes.has(d.id);
       if (d.id.includes('construction_yard')) return false;
-      if (d.kind === 'building' && this.has(playerId, d.id)) return false;
       if (d.faction !== 'both' && d.faction !== p.faction) return false;
       if (d.country && d.country !== p.country) return false;
-      if (!this.superweapons && ['chronosphere', 'weather_control', 'iron_curtain', 'nuclear_silo'].includes(d.id)) return false;
+      if (!this.superweapons && SUPERWEAPON_BUILDINGS.has(d.id)) return false;
       return (d.prerequisites ?? []).every(r => this.has(playerId, r));
     });
   }
@@ -292,15 +288,27 @@ export class GameEngine {
     const p = this.getPlayer(playerId), def = CATALOG[type];
     if (!p || !def || p.defeated || this.status !== 'playing') return '无法生产';
     if (this.bootcamp && !bootcampTypes.has(type)) return '训练营尚无此型号的 3D 模型';
-    if (!this.bootcamp && def.kind === 'building' && this.has(playerId, type)) return '该建筑已建造';
     if (!this.getAvailable(playerId).some(d => d.id === type)) return '需要前置建筑';
+    if (!this.bootcamp && def.buildLimit !== undefined &&
+        this.ownEntities(playerId).filter(e => e.type === type).length + p.queues[def.category].filter(q => q.type === type).length >= def.buildLimit) return '已达到建造上限';
     if (this.bootcamp && def.kind === 'unit' && !this.trainingSpawn(playerId, def)) return '没有适合该单位的空闲地形';
+    if (!this.bootcamp && def.category === 'aircraft') {
+      const { capacity, used } = this.aircraftCapacity(playerId);
+      if (used + p.queues.aircraft.length >= capacity) return '飞机名额已满';
+    }
     if (!this.bootcamp && p.credits < def.cost) return '资金不足';
     const queue = p.queues[def.category];
     if (queue.length >= (def.kind === 'building' ? 1 : 12)) return '生产队列已满';
     return '';
   }
   canBuild(playerId: number, type: string): boolean { return this.getBuildReason(playerId, type) === ''; }
+  aircraftCapacity(playerId: number): { capacity: number; used: number } {
+    const owned = this.ownEntities(playerId);
+    return {
+      capacity: owned.filter(e => getDefinition(e.type).producer === 'aircraft').length * AIRCRAFT_DOCK_OFFSETS.length,
+      used: owned.filter(e => getDefinition(e.type).category === 'aircraft').length,
+    };
+  }
   build(playerId: number, type: string): boolean {
     const reason = this.getBuildReason(playerId, type);
     if (reason) { this.lastMessage = reason; return false; }
@@ -340,6 +348,7 @@ export class GameEngine {
     const def = CATALOG[type];
     if (!def || def.kind !== 'building') return '选择要建造的建筑';
     if (this.bootcamp && !bootcampTypes.has(type)) return '训练营尚无此型号的 3D 模型';
+    if (!this.bootcamp && def.buildLimit !== undefined && this.ownEntities(playerId).filter(e => e.type === type).length >= def.buildLimit) return '已达到建造上限';
     if (!this.footprintClear(def, x, y)) return def.naval ? '船坞需要空旷水面' : '此处无法建造';
     const bounds = this.getPlacementBounds(type, x, y);
     const center = { x: bounds.centerX, y: bounds.centerY };
@@ -379,6 +388,13 @@ export class GameEngine {
       passengers: isTransport(type) ? [] : undefined,
     };
     this.entities.push(e); this.entityMap.set(e.id, e);
+    if (e.type === 'nighthawk') e.flightHeight = 0;
+    if (d.category === 'aircraft') {
+      const dock = assignAircraftDock(e, this.entities);
+      e.ammo = 1; e.reloadRemaining = 0;
+      e.flightHeight = dock && distance(e, dock) < .1 ? 0 : AIRCRAFT_CRUISE_HEIGHT;
+      e.flightSpeed = e.flightHeight === 0 ? 0 : d.speed ?? 6;
+    }
     if (e.kind === 'building') { this.rebuildBlocked(); this.updatePower(); }
     if (d.harvest && (!this.bootcamp || owner === this.localPlayerId)) this.assignHarvest(e);
     return e;
@@ -394,7 +410,8 @@ export class GameEngine {
       if (pos) this.spawnEntity(type, e.owner, pos.x, pos.y);
     }
     for (const [key, value] of Object.entries(abilities)) {
-      if (value.building === e.type && (key !== 'paradrop' || p.country === 'america')) p.abilityCooldowns[key] = value.duration;
+      if (value.building === e.type && (key !== 'paradrop' || p.country === 'america') &&
+          this.ownEntities(p.id).filter(building => building.type === e.type).length === 1) p.abilityCooldowns[key] = value.duration;
     }
     this.updateFog();
   }
@@ -455,6 +472,26 @@ export class GameEngine {
     });
   }
   commandAttackMove(ids: number[], x: number, y: number): void { this.commandMove(ids, x, y, true); }
+  setPrimaryFactory(id: number): boolean {
+    const factory = this.getEntity(id), category = factory && getDefinition(factory.type).producer;
+    if (!factory || factory.hp <= 0 || !category || !['infantry', 'vehicle', 'naval', 'aircraft'].includes(category)) return false;
+    for (const other of this.ownEntities(factory.owner)) if (getDefinition(other.type).producer === category) other.primaryFactory = other.id === id;
+    return true;
+  }
+  getRallyPoint(factory: Entity): Point | undefined {
+    if (factory.kind !== 'building' || factory.hp <= 0 || !['infantry', 'vehicle', 'naval'].includes(getDefinition(factory.type).producer ?? '')) return;
+    return factory.rallyPoint ?? { x: factory.x + 4, y: factory.y + 5 };
+  }
+  setRallyPoint(ids: number[], x: number, y: number): boolean {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || this.terrainAt(x, y) === 'void') return false;
+    let changed = false;
+    for (const id of ids) {
+      const factory = this.getEntity(id);
+      if (!factory || !this.getRallyPoint(factory)) continue;
+      factory.rallyPoint = { x: Math.floor(x) + .5, y: Math.floor(y) + .5 }; changed = true;
+    }
+    return changed;
+  }
   commandAttack(ids: number[], targetId: number): void {
     const target = this.getEntity(targetId);
     if (!target || target.hp <= 0) return;
@@ -471,6 +508,11 @@ export class GameEngine {
         continue;
       }
       if (this.isAllied(e.owner, target.owner)) {
+        if (getDefinition(e.type).category === 'aircraft' && target.type === 'airforce_command' && e.owner === target.owner) {
+          const index = target.id === e.homeAirfieldId ? e.aircraftPadIndex : freeAircraftPad(target, this.entities, e.id);
+          if (index !== undefined) { e.homeAirfieldId = target.id; e.aircraftPadIndex = index; this.setOrder(e, { kind: 'idle' }); }
+          continue;
+        }
         if (getDefinition(e.type).harvest && target.type.includes('refinery')) this.setOrder(e, { kind: 'return', targetId });
         continue;
       }
@@ -482,7 +524,7 @@ export class GameEngine {
   commandStop(ids: number[]): void {
     for (const id of ids) { const e = this.getEntity(id); if (e) { this.setOrder(e, { kind: 'idle' }); e.targetId = undefined; } }
   }
-  private setOrder(e: Entity, order: Order) { e.waypoints = []; e.order = order; e.path = []; e.repathTimer = 0; }
+  private setOrder(e: Entity, order: Order) { e.prismCharge = undefined; e.waypoints = []; e.order = order; e.path = []; e.repathTimer = 0; }
 
   load(ids: number[], transportId: number): number {
     const transport = this.getEntity(transportId);
@@ -494,7 +536,7 @@ export class GameEngine {
       const def = getDefinition(e.type), transportDef = getDefinition(transport.type);
       if (transportDef.infantryOnly && def.category !== 'infantry') continue;
       if (this.passengerSpaceUsed(transport) + this.passengerSize(e) > (transportDef.transportCapacity ?? 0)) break;
-      if (distance(e, transport) > 3) { this.setOrder(e, { kind: 'load', targetId: transportId }); this.lastMessage = '部队正在靠近运输载具'; continue; }
+      if (distance(e, transport) > 3 || (transport.type === 'nighthawk' && (transport.flightHeight ?? 0) > .1)) { this.setOrder(e, { kind: 'load', targetId: transportId }); this.lastMessage = '部队正在靠近运输载具'; continue; }
       transport.passengers ??= []; transport.passengers.push(id);
       if (e.controlledId) this.releaseMindControl(e);
       e.transportedBy = transport.id; e.order = { kind: 'idle' }; e.path = []; e.waypoints = []; count++;
@@ -507,6 +549,7 @@ export class GameEngine {
     for (const id of ids) {
       const transport = this.getEntity(id);
       if (!transport?.passengers?.length) continue;
+      if (transport.type === 'nighthawk' && (transport.flightHeight ?? 0) > .1) { this.commandStop([id]); transport.unloadAfterLanding = true; continue; }
       const remaining: number[] = [];
       for (const passenger of transport.passengers) {
         const e = this.getEntity(passenger); if (!e) continue;
@@ -537,21 +580,25 @@ export class GameEngine {
     return e.type === 'ifv' ? (e.weaponMode ?? 'missile') : '';
   }
   /** Native IFV passenger weapon slots from original rules.ini. */
-  getCombatDefinition(e: Entity): Definition {
+  getCombatDefinition(e: Entity, target?: Entity): Definition {
     const base = getDefinition(e.type);
+    const enemy = target && getDefinition(target.type);
+    if (e.type === 'tanya' && (target?.kind === 'building' || enemy?.naval)) return { ...base, range: 1.5, damage: 2500, weapon: 'explosive' };
+    if (e.type === 'apocalypse' && enemy?.flying && (target?.flightHeight === undefined || target.flightHeight > .1)) return { ...base, weapon: 'missile' };
+    if (e.type === 'destroyer' && target && ['submarine', 'giant_squid'].includes(target.type)) return { ...base, weapon: 'carrier' };
     if (e.type !== 'ifv' || !e.passengers?.length) return base;
     const common = { ...base, antiAir: false };
     switch (this.getUnitMode(e)) {
       case 'repair': return { ...common, damage: 0, range: 2, cooldown: 1 };
       case 'machinegun': return { ...common, damage: 20, range: 6, cooldown: .5, weapon: 'bullet' };
-      case 'flak': return { ...common, damage: 25, range: 6, cooldown: .7, weapon: 'shell', antiAir: true };
+      case 'flak': return { ...common, damage: 25, range: 6, cooldown: .7, weapon: 'flak', antiAir: true };
       case 'pistol': return { ...common, damage: 85, range: 6, cooldown: .5, weapon: 'bullet' };
       case 'sniper': return { ...common, damage: 125, range: 14, cooldown: 2, weapon: 'bullet' };
       case 'tesla': return { ...common, damage: 60, range: 6, cooldown: 1.5, weapon: 'tesla' };
       case 'ivan': return { ...common, damage: 200, range: 1, cooldown: 1, weapon: 'explosive' };
       case 'psychic': return { ...common, damage: 200, range: 1.5, cooldown: 1.5, weapon: 'tesla' };
       case 'radiation': return { ...common, damage: 175, range: 7, cooldown: 1, weapon: 'radiation' };
-      case 'chrono': return { ...common, damage: 140, range: 6, cooldown: 2.5, weapon: 'tesla' };
+      case 'chrono': return { ...common, damage: 140, range: 6, cooldown: 2.5, weapon: 'chrono' };
       case 'terrorist': return { ...common, damage: 250, range: 1.5, cooldown: 1, weapon: 'explosive' };
       default: return common;
     }
@@ -581,10 +628,14 @@ export class GameEngine {
     this.checkVictory(true);
   }
 
-  getSupport(playerId: number): { id: string; name: string; remaining: number; total: number; ready: boolean }[] {
-    const p = this.getPlayer(playerId); if (!p || this.bootcamp) return [];
+  getSupport(playerId: number) {
+    const p = this.getPlayer(playerId); if (!p || p.defeated || this.bootcamp) return [];
     return Object.entries(abilities).filter(([id, a]) => id === 'paradrop' ? (this.has(playerId, 'neutral_caairp') || (this.has(playerId, a.building!) && p.country === 'america')) : this.has(playerId, a.building!))
-      .map(([id, a]) => ({ id, name: a.name, remaining: p.abilityCooldowns[id] ?? a.duration, total: a.duration, ready: (p.abilityCooldowns[id] ?? a.duration) <= 0 && this.isPowered(playerId) }));
+      .map(([id, a]) => {
+        const remaining = p.abilityCooldowns[id] ?? a.duration, paused = a.powered && !this.isPowered(playerId);
+        const cameo = id === 'paradrop' && !(p.country === 'america' && this.has(playerId, a.building)) ? 'para' : a.cameo;
+        return { id, name: a.name, remaining, total: a.duration, ready: remaining <= 0 && !paused, paused, cameo, showTimer: a.showTimer };
+      });
   }
   support(playerId: number, kind: string, x: number, y: number, ids: number[] = []): boolean {
     const ability = this.getSupport(playerId).find(a => a.id === kind), p = this.getPlayer(playerId);
@@ -637,7 +688,7 @@ export class GameEngine {
     for (const p of this.players) {
       if (p.defeated) continue;
       this.advanceProduction(p, dt);
-      if (this.isPowered(p.id)) for (const key of Object.keys(p.abilityCooldowns)) p.abilityCooldowns[key] = Math.max(0, p.abilityCooldowns[key] - dt);
+      for (const ability of this.getSupport(p.id)) if (!ability.paused) p.abilityCooldowns[ability.id] = Math.max(0, ability.remaining - dt);
       const support = this.getSupport(p.id);
       p.supportCooldown = support.length ? Math.min(...support.map(a => a.remaining)) : 0;
       if (p.ai && !this.bootcamp) { p.aiTimer -= dt; p.aiAttackTimer -= dt; if (p.aiTimer <= 0) { p.aiTimer = p.difficulty === 'easy' ? 4 : p.difficulty === 'hard' ? 1.4 : 2.5; this.runAI(p); } }
@@ -655,18 +706,41 @@ export class GameEngine {
       if(e.x!==previousX||e.y!==previousY)e.lastMovedAt=this.time;
     }
     this.separateUnits(dt);
-    for (const effect of this.effects) effect.age += dt;
-    this.effects = this.effects.filter(e => e.age < e.duration);
+    for (const effect of [...this.effects]) {
+      effect.age += dt;
+      if (effect.impact && effect.weapon !== 'bomb') {
+        const target = this.getEntity(effect.targetId ?? -1);
+        if (target) { effect.toX = target.x; effect.toY = target.y; effect.toHeight = getDefinition(target.type).flying ? target.flightHeight ?? 45 : 6; }
+      }
+      if (effect.impact && effect.age >= effect.impact.at) {
+        const impact = effect.impact; effect.impact = undefined;
+        const target = this.getEntity(effect.targetId ?? -1), source = this.getEntity(effect.sourceId ?? -1);
+        // 投弹打击落点；导弹与鱼雷追踪发射时选定的目标。
+        if (target && (effect.weapon !== 'bomb' || distance(target, { x: effect.toX!, y: effect.toY! }) < 1.5)) this.damage(target, impact.damage, impact.owner, source);
+        if (impact.splash) for (const other of [...this.entities]) {
+          if (other.id !== effect.targetId && !this.isAllied(impact.owner, other.owner) && distance(other, { x: effect.toX!, y: effect.toY! }) < impact.splash) this.damage(other, impact.damage * .35, impact.owner, source);
+        }
+        this.effect({ kind: 'explosion', x: effect.toX!, y: effect.toY!, fromHeight: effect.toHeight, duration: .4, radius: .5 });
+      }
+    }
+    this.effects = this.effects.filter(e => e.age < e.duration && (!e.prismSupport || (
+      this.getEntity(e.targetId!)?.prismCharge?.supportIds.includes(e.sourceId!) &&
+      this.getEntity(e.sourceId!)?.owner === this.getEntity(e.targetId!)?.owner &&
+      this.isPowered(this.getEntity(e.sourceId!)!.owner))));
   }
 
   private advanceProduction(p: PlayerState, dt: number) {
     for (const category of CATEGORIES) {
       const item = p.queues[category][0]; if (!item || item.ready) continue;
       const d = getDefinition(item.type);
-      const producer = d.kind === 'building' ? this.has(p.id, 'yard') : this.entities.some(e => e.owner === p.id && getDefinition(e.type).producer === category);
+      const producer = d.kind === 'building' ? this.has(p.id, 'yard') : this.entities.some(e => e.hp > 0 && e.owner === p.id && getDefinition(e.type).producer === category);
       if (!producer && !this.bootcamp) continue;
+      if (category === 'aircraft' && !this.bootcamp) {
+        const { capacity, used } = this.aircraftCapacity(p.id);
+        if (used >= capacity) continue;
+      }
       if (this.bootcamp && !bootcampTypes.has(item.type)) { p.queues[category].shift(); continue; }
-      const producers = Math.min(3, this.entities.filter(e => e.owner === p.id && getDefinition(e.type).producer === category).length);
+      const producers = Math.min(3, this.entities.filter(e => e.hp > 0 && e.owner === p.id && getDefinition(e.type).producer === category).length);
       const powered = this.isPowered(p.id) ? 1 : .35;
       const difficulty = !p.ai ? 1 : p.difficulty === 'easy' ? .75 : p.difficulty === 'hard' ? 1.15 : 1;
       item.progress = this.getDebugInstantProduction(p.id) ? 1
@@ -674,7 +748,8 @@ export class GameEngine {
       if (item.progress < 1) continue;
       if (d.kind === 'building') { item.ready = true; this.event(`${d.name}已就绪，请选择放置位置。`, p.id, 'complete'); }
       else {
-        const factories = this.entities.filter(e => e.owner === p.id && e.hp > 0 && getDefinition(e.type).producer === category);
+        const factories = this.entities.filter(e => e.owner === p.id && e.hp > 0 && getDefinition(e.type).producer === category)
+          .sort((a, b) => Number(!!b.primaryFactory) - Number(!!a.primaryFactory));
         const factory = category === 'aircraft'
           ? factories.find(e => this.aircraftPad(e) !== undefined)
           : factories[0];
@@ -684,8 +759,8 @@ export class GameEngine {
         if (!pos) continue;
         const e = this.spawnEntity(d.id, p.id, pos.x, pos.y);
         p.queues[category].shift(); p.unitsBuilt++;
-        if (!d.harvest && category !== 'aircraft' && factory && !this.bootcamp) {
-          const rally = this.nearestPassable({ x: factory.x + 4, y: factory.y + 5 }, d);
+        if ((!d.harvest || factory?.rallyPoint) && category !== 'aircraft' && factory && (!this.bootcamp || factory.rallyPoint)) {
+          const rally = this.nearestPassable(this.getRallyPoint(factory)!, d);
           this.setOrder(e, { kind: 'move', x: rally.x, y: rally.y });
         }
         this.event(`${d.name}训练完成。`, p.id, 'complete');
@@ -710,6 +785,7 @@ export class GameEngine {
     if (e.type.includes('repair_depot') || e.type === 'neutral_caoutp') for (const unit of this.nearby(e.x, e.y, 5)) {
       if (unit.owner === e.owner && unit.kind === 'unit' && getDefinition(unit.type).armor === 'heavy' && distance(unit, e) < 5) unit.hp = Math.min(unit.maxHp, unit.hp + 20 * dt);
     }
+    if (e.prismCharge && !this.isPowered(e.owner)) e.prismCharge = undefined;
     if (d.damage && ((d.power ?? 0) >= 0 || this.isPowered(e.owner))) this.combat(e, dt);
   }
   private finishMove(e:Entity) {
@@ -717,6 +793,14 @@ export class GameEngine {
   }
   private updateUnit(e: Entity, dt: number) {
     const d = getDefinition(e.type);
+    if (d.category === 'aircraft') { this.updateAircraft(e, dt); return; }
+    if ((e.chronoReadyAt ?? 0) > this.time) return;
+    if (e.type === 'nighthawk') {
+      const landing = e.order.kind === 'idle' && this.terrainAt(e.x, e.y) !== 'water' && this.terrainAt(e.x, e.y) !== 'cliff' && !this.blocked[Math.floor(e.y) * this.map.width + Math.floor(e.x)];
+      e.flightHeight = clamp((e.flightHeight ?? 0) + (landing ? -30 : 30) * dt, 0, 45);
+      if (landing && e.flightHeight === 0 && e.unloadAfterLanding) { e.unloadAfterLanding = false; this.unload([e.id]); }
+      if (landing || e.flightHeight < 45) return;
+    }
     if (e.type === 'apocalypse' && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + 3 * dt);
     if (e.type === 'desolator' && e.deployed) {
       e.harvestTimer += dt;
@@ -745,6 +829,53 @@ export class GameEngine {
       this.moveToward(e, goal, dt);
       if (distance(e, goal) < .4) this.finishMove(e);
     }
+  }
+  private updateAircraft(e: Entity, dt: number) {
+    const dock = assignAircraftDock(e, this.entities), def = getDefinition(e.type);
+    e.ammo ??= 1; e.reloadRemaining ??= 0;
+    e.flightHeight ??= dock && distance(e, dock) < .1 ? 0 : AIRCRAFT_CRUISE_HEIGHT;
+    e.flightSpeed ??= e.flightHeight === 0 ? 0 : def.speed ?? 6;
+    let target = e.order.kind === 'attack' ? this.getEntity(e.order.targetId) : undefined;
+    if (e.order.kind === 'attack' && (!target || !this.canAttack(e, target))) {
+      this.setOrder(e, { kind: 'idle' }); target = undefined;
+    }
+    // 飞机保留原来的攻击命令，落地装弹后继续执行。
+    if (e.ammo === 0 || e.order.kind === 'idle') {
+      e.targetId = undefined;
+      if (dock && distance(e, dock) < .05) {
+        e.x = dock.x; e.y = dock.y;
+        e.flightSpeed = 0;
+        e.flightHeight = Math.max(0, e.flightHeight - AIRCRAFT_CLIMB_SPEED * dt);
+        if (e.flightHeight === 0 && e.ammo === 0 && this.isPowered(e.owner)) {
+          e.reloadRemaining = Math.max(0, e.reloadRemaining - dt);
+          if (e.reloadRemaining === 0) e.ammo = 1;
+        }
+        return;
+      }
+      e.flightHeight = Math.min(AIRCRAFT_CRUISE_HEIGHT, e.flightHeight + AIRCRAFT_CLIMB_SPEED * dt);
+      if (dock) this.moveToward(e, dock, dt);
+      else {
+        // 机场损失后，飞机盘旋等待空闲停机位。
+        e.angle += dt;
+        const goal = { x: clamp(e.x + Math.cos(e.angle), .5, this.map.width - .5), y: clamp(e.y + Math.sin(e.angle), .5, this.map.height - .5) };
+        this.moveToward(e, goal, dt);
+      }
+      return;
+    }
+    e.flightHeight = Math.min(AIRCRAFT_CRUISE_HEIGHT, e.flightHeight + AIRCRAFT_CLIMB_SPEED * dt);
+    if (target) {
+      this.moveToward(e, target, dt);
+      if (e.flightHeight === AIRCRAFT_CRUISE_HEIGHT && this.visible(e.owner, target.x, target.y) && distance(e, target) <= (def.range ?? 6) && e.cooldown <= 0) {
+        this.combat(e, dt, false);
+        e.ammo = 0; e.reloadRemaining = AIRCRAFT_RELOAD_SECONDS;
+      }
+      return;
+    }
+    if (e.order.kind === 'move' || e.order.kind === 'attackMove') {
+      const goal = { x: e.order.x, y: e.order.y };
+      this.moveToward(e, goal, dt);
+      if (distance(e, goal) < .1) this.finishMove(e);
+    } else this.setOrder(e, { kind: 'idle' });
   }
   private updateCapture(e: Entity, dt: number) {
     if (e.order.kind !== 'capture') return;
@@ -847,13 +978,15 @@ export class GameEngine {
   }
 
   private canAttack(attacker: Entity, target: Entity): boolean {
-    const d = this.getCombatDefinition(attacker), t = getDefinition(target.type);
+    const d = this.getCombatDefinition(attacker, target), t = getDefinition(target.type);
     if (target.hp <= 0 || target.transportedBy || this.isAllied(attacker.owner, target.owner) || !d.damage) return false;
     if (target.owner < 0 && !(attacker.order.kind === 'attack' && attacker.order.targetId === target.id)) return false;
-    if (t.flying && !d.antiAir) return false;
-    if (!t.flying && d.canAttackGround === false) return false;
+    const airborne = t.flying && (target.flightHeight === undefined || target.flightHeight > .1);
+    if (airborne && !d.antiAir) return false;
+    if (!airborne && d.canAttackGround === false) return false;
     if ((attacker.type.includes('dog') || attacker.type === 'sniper') && target.kind === 'building') return false;
     if (attacker.type.includes('dog') && t.armor !== 'none') return false;
+    if (attacker.type === 'terror_drone' && (target.kind === 'building' || t.naval)) return false;
     if (['submarine', 'dolphin', 'giant_squid'].includes(attacker.type) && !t.naval) return false;
     if (attacker.type === 'yuri' && (target.kind !== 'unit' || t.flying || t.harvest || t.mindControlImmune || target.type === 'terror_drone' || (target.invulnerableUntil ?? 0) > this.time)) return false;
     if (attacker.type === 'crazy_ivan' && target.bomb) return false;
@@ -861,13 +994,16 @@ export class GameEngine {
   }
   private combat(e: Entity, dt: number, chase = true): boolean {
     if (this.bootcamp && e.owner !== this.localPlayerId) return false;
+    if (e.prismCharge) return this.firePrismTower(e);
+    if (e.type === 'prism_tower' && this.entities.some(tower => tower.prismCharge?.supportIds.includes(e.id))) return true;
     if (e.holdFire && e.order.kind !== 'attack') return false;
-    const d = this.getCombatDefinition(e);
+    let d = this.getCombatDefinition(e);
     if (!d.damage) return false;
     if (e.type === 'yuri' && e.controlledId && e.order.kind !== 'attack') return false;
+    if (['carrier', 'nighthawk'].includes(e.type) && e.order.kind !== 'attack') return false;
     let target = e.order.kind === 'attack' ? this.getEntity(e.order.targetId) : e.targetId ? this.getEntity(e.targetId) : undefined;
     if (target && (!this.canAttack(e, target) || !this.visible(e.owner, target.x, target.y))) target = undefined;
-    const range = (d.range ?? 0) + (e.type === 'gi' && e.deployed ? 2 : 0) + (e.veteran >= 2 ? .7 : 0);
+    let range = (d.range ?? 0) + (e.type === 'gi' && e.deployed ? 2 : 0) + (e.veteran >= 2 ? .7 : 0);
     if (target && e.order.kind !== 'attack' && distance(e, target) > range + 3) target = undefined;
     if (!target && e.order.kind !== 'attack') {
       let best = Infinity;
@@ -889,6 +1025,8 @@ export class GameEngine {
       return e.order.kind === 'attack';
     }
     e.targetId = target.id;
+    d = this.getCombatDefinition(e, target);
+    range = (d.range ?? 0) + (e.type === 'gi' && e.deployed ? 2 : 0) + (e.veteran >= 2 ? .7 : 0);
     const targetRadius = target.kind === 'building' ? Math.min(...(getDefinition(target.type).size ?? [1, 1])) / 2 : .3;
     if (distance(e, target) > range + targetRadius) {
       if (chase && e.kind === 'unit' && !e.deployed) this.moveToward(e, target, dt);
@@ -896,18 +1034,29 @@ export class GameEngine {
     }
     e.angle = Math.atan2(target.y - e.y, target.x - e.x);
     if (e.cooldown > 0) return true;
+    if (e.type === 'prism_tower') {
+      const reserved = new Set(this.entities.flatMap(tower => tower.prismCharge?.supportIds ?? []));
+      const supporters = this.entities.filter(tower => tower.id !== e.id && tower.type === 'prism_tower' &&
+        tower.owner === e.owner && tower.hp > 0 && tower.cooldown <= 0 && !tower.holdFire &&
+        !tower.prismCharge && !reserved.has(tower.id) && tower.order.kind === 'idle' &&
+        distance(tower, e) <= PRISM_SUPPORT_RANGE).slice(0, PRISM_SUPPORT_MAX);
+      e.prismCharge = { targetId: target.id, fireAt: this.time + PRISM_CHARGE_SECONDS, supportIds: supporters.map(tower => tower.id) };
+      for (const tower of supporters) this.effect({ kind: 'shot', weapon: 'prism', prismSupport: true,
+        x: tower.x, y: tower.y, toX: e.x, toY: e.y, fromHeight: PRISM_TOWER_HEIGHT, toHeight: PRISM_TOWER_HEIGHT,
+        sourceId: tower.id, targetId: e.id, color: this.getPlayer(e.owner)?.color, duration: PRISM_CHARGE_SECONDS });
+      return true;
+    }
     e.cooldown = (d.cooldown ?? 1) * (e.veteran >= 2 ? .8 : 1);
     e.lastShot = this.time;
     if (e.type === 'yuri') { this.mindControl(e, target); return true; }
     if (e.type === 'crazy_ivan') { this.setOrder(e, { kind: 'demolish', targetId: target.id }); return true; }
     if (e.type === 'ifv' && this.getUnitMode(e) === 'psychic') { this.psychicPulse(e, 200, 3); return true; }
-    let damage = d.damage * (1 + e.veteran * .2) * (e.type === 'gi' && e.deployed ? 1.7 : 1);
+    let damage = (d.damage ?? 0) * (1 + e.veteran * .2) * (e.type === 'gi' && e.deployed ? 1.7 : 1);
     const armor = getDefinition(target.type).armor;
     if (d.weapon === 'bullet') damage *= armor === 'heavy' ? .25 : armor === 'building' ? .35 : 1;
     if (d.weapon === 'shell') damage *= armor === 'none' ? .6 : 1;
     if (e.type === 'tank_destroyer') damage *= armor === 'heavy' ? 1.65 : .25;
     if (e.type === 'sniper' || (e.type === 'ifv' && this.getUnitMode(e) === 'sniper')) damage *= armor === 'none' ? 1 : .08;
-    if (e.type === 'tanya' && target.kind === 'building') damage *= 3;
     if (e.type === 'terror_drone') damage *= armor === 'heavy' ? 1.7 : 1;
     if (e.type === 'terrorist' || e.type === 'demolition_truck' || (e.type === 'ifv' && ['ivan', 'terrorist'].includes(this.getUnitMode(e)))) {
       const radius = e.type === 'demolition_truck' ? 7 : e.type === 'ifv' ? 4 : 3;
@@ -916,12 +1065,60 @@ export class GameEngine {
       this.removeEntity(e, false);
       return true;
     }
-    this.effect({ kind: 'shot', sourceId: e.id, targetId: target.id, x: e.x, y: e.y, toX: target.x, toY: target.y, duration: d.weapon === 'tesla' ? .22 : .3, weapon: d.weapon, color: this.getPlayer(e.owner)?.color });
-    this.damage(target, damage, e.owner, e);
-    if ((d.weapon === 'radiation' || e.type === 'prism_tank' || e.type === 'v3' || e.type === 'grand_cannon') && target.hp > 0) {
+    const projectile = ['missile', 'bomb', 'torpedo', 'carrier'].includes(d.weapon ?? '');
+    const duration = d.weapon === 'carrier' ? Math.max(2, distance(e, target) / 4) : d.weapon === 'bomb' ? .9 : projectile ? Math.max(.35, distance(e, target) / 10) : d.weapon === 'prism' ? 1 : .3;
+    const splash = d.weapon === 'bomb' || e.type === 'v3' || e.type === 'dreadnought' ? 2 : 0;
+    const missiles = d.category === 'aircraft' ? 2 : 1;
+    for (let i = 0; i < missiles; i++) {
+    const delay = i * .2, wing = missiles > 1 ? (i ? 1 : -1) * .18 : 0;
+    this.effect({ kind: 'shot', sourceId: e.id, targetId: target.id, x: e.x - Math.sin(e.angle) * wing, y: e.y + Math.cos(e.angle) * wing, toX: target.x, toY: target.y, duration: duration + delay, delay, weapon: d.weapon, color: this.getPlayer(e.owner)?.color,
+      fromHeight: d.flying ? e.flightHeight ?? 45 : e.type === 'prism_tank' ? 35 : 12, toHeight: getDefinition(target.type).flying ? target.flightHeight ?? 45 : 6,
+      arc: ['v3', 'dreadnought'].includes(e.type) ? 70 : d.weapon === 'shell' ? 15 : 0,
+      burst: e.type === 'apocalypse' ? 2 : d.weapon === 'carrier' ? 3 : 1,
+      projectileSprite: d.weapon === 'missile' && !['v3', 'dreadnought'].includes(e.type) ? 'dragon' : undefined,
+      impact: projectile ? { damage: damage / missiles, owner: e.owner, splash, at: (d.weapon === 'carrier' ? duration * .5 : duration) + delay } : undefined });
+    }
+    if (!projectile) this.damage(target, damage, e.owner, e);
+    if (e.type === 'prism_tank' && target.kind !== 'building') this.splitPrismBeam(e, target);
+    if (!projectile && (d.weapon === 'radiation' || e.type === 'grand_cannon') && target.hp > 0) {
       for (const other of this.nearby(target.x, target.y, 2)) if (other.id !== target.id && other.id !== e.id && !this.isAllied(e.owner, other.owner) && distance(other, target) < 2) this.damage(other, damage * .35, e.owner, e);
     }
     return true;
+  }
+  private firePrismTower(tower: Entity): boolean {
+    const charge = tower.prismCharge!, target = this.getEntity(charge.targetId), d = getDefinition(tower.type);
+    const radius = target?.kind === 'building' ? Math.min(...(getDefinition(target.type).size ?? [1, 1])) / 2 : .3;
+    if (!target || !this.canAttack(tower, target) || !this.visible(tower.owner, target.x, target.y) ||
+        distance(tower, target) > (d.range ?? 8) + radius || !this.isPowered(tower.owner)) {
+      tower.prismCharge = undefined; return false;
+    }
+    charge.supportIds = charge.supportIds.filter(id => {
+      const helper = this.getEntity(id);
+      return helper && helper.hp > 0 && helper.owner === tower.owner && helper.cooldown <= 0 &&
+        !helper.holdFire && helper.order.kind === 'idle' && distance(helper, tower) <= PRISM_SUPPORT_RANGE;
+    });
+    if (this.time < charge.fireAt) return true;
+    const multiplier = 1 + charge.supportIds.length * PRISM_SUPPORT_MODIFIER;
+    for (const id of charge.supportIds) {
+      const helper = this.getEntity(id)!; helper.cooldown = d.cooldown ?? 4; helper.lastShot = this.time;
+    }
+    tower.prismCharge = undefined; tower.cooldown = d.cooldown ?? 4; tower.lastShot = this.time;
+    this.effect({ kind: 'shot', weapon: 'prism', sourceId: tower.id, targetId: target.id,
+      x: tower.x, y: tower.y, toX: target.x, toY: target.y, fromHeight: PRISM_TOWER_HEIGHT, toHeight: 6,
+      duration: 1, beamWidth: Math.min(8, 2 + charge.supportIds.length), color: this.getPlayer(tower.owner)?.color });
+    this.damage(target, (d.damage ?? 120) * (1 + tower.veteran * .2) * multiplier, tower.owner, tower);
+    return true;
+  }
+  private splitPrismBeam(source: Entity, origin: Entity) {
+    const targets = this.entities.filter(target => target.id !== origin.id && this.canAttack(source, target) &&
+      this.visible(source.owner, target.x, target.y) && distance(target, origin) <= 3)
+      .sort((a, b) => distance(a, origin) - distance(b, origin) || a.id - b.id).slice(0, 3);
+    for (const target of targets) {
+      this.effect({ kind: 'shot', weapon: 'prism', sourceId: source.id, targetId: target.id,
+        x: origin.x, y: origin.y, toX: target.x, toY: target.y, fromHeight: 6, toHeight: 6,
+        duration: 1, color: this.getPlayer(source.owner)?.color });
+      this.damage(target, 30 * (1 + source.veteran * .2), source.owner, source);
+    }
   }
   protected damage(target: Entity, amount: number, attackerOwner: number, attacker?: Entity) {
     if (target.hp <= 0 || (target.invulnerableUntil ?? 0) > this.time) return;
@@ -989,10 +1186,26 @@ export class GameEngine {
   }
   private moveToward(e: Entity, goal: Point, dt: number) {
     const d = getDefinition(e.type); if (e.deployed) return;
+    if (e.type === 'chrono_legionnaire') {
+      if ((e.chronoReadyAt ?? 0) > this.time || distance(e, goal) < .4) return;
+      const to = this.nearestPassable(goal, d), dist = distance(e, to);
+      if (dist < .4) return;
+      this.effect({ kind: 'deploy', x: e.x, y: e.y, duration: .7, color: '#8ff5ff' });
+      e.x = to.x; e.y = to.y; e.path = []; e.chronoReadyAt = this.time + Math.min(6, Math.max(.5, dist * .15));
+      this.effect({ kind: 'deploy', x: e.x, y: e.y, duration: e.chronoReadyAt - this.time, color: '#8ff5ff' });
+      return;
+    }
     if (d.flying) {
       const dist = distance(e, goal);
       if (dist < .05) return;
-      const move = Math.min(dist, (d.speed ?? 2) * dt);
+      let speed = d.speed ?? 2;
+      if (d.category === 'aircraft') {
+        const desired = Math.min(speed, Math.sqrt(2 * AIRCRAFT_ACCELERATION * dist));
+        const current = e.flightSpeed ?? 0;
+        e.flightSpeed = current + clamp(desired - current, -AIRCRAFT_ACCELERATION * dt, AIRCRAFT_ACCELERATION * dt);
+        speed = (current + e.flightSpeed) / 2;
+      }
+      const move = Math.min(dist, speed * dt);
       e.angle = Math.atan2(goal.y - e.y, goal.x - e.x);
       e.x += Math.cos(e.angle) * move; e.y += Math.sin(e.angle) * move;
       return;
@@ -1018,15 +1231,8 @@ export class GameEngine {
   }
 
   private aircraftPad(factory: Entity): Point | undefined {
-    const pads = [
-      { x: factory.x - .7, y: factory.y - .55 },
-      { x: factory.x + .7, y: factory.y - .55 },
-      { x: factory.x - .7, y: factory.y + .55 },
-      { x: factory.x + .7, y: factory.y + .55 },
-    ];
-    return pads.find(pad => !this.entities.some(e =>
-      e.hp > 0 && e.owner === factory.owner && getDefinition(e.type).category === 'aircraft'
-      && !e.transportedBy && distance(e, pad) < .4));
+    const index = freeAircraftPad(factory, this.entities);
+    return index === undefined ? undefined : aircraftPads(factory)[index];
   }
 
   private assignHarvest(e: Entity) {
@@ -1136,7 +1342,7 @@ export class GameEngine {
       for (const other of this.nearby(e.x, e.y, 2)) {
         if (other.id <= e.id || other.kind !== 'unit' || other.hp <= 0 || other.transportedBy) continue;
         const od = getDefinition(other.type);
-        if (!!d.flying !== !!od.flying) continue;
+        if (!!d.flying !== !!od.flying || d.category === 'aircraft' || od.category === 'aircraft') continue;
         const radius = (d.armor === 'none' ? .3 : .55) + (od.armor === 'none' ? .3 : .55);
         const dist = distance(e, other);
         if (dist >= radius) continue;

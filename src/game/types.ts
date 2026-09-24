@@ -17,9 +17,10 @@ export interface Definition {
   category: ProductionCategory; cost: number; buildTime: number; hp: number;
   sprite: string; cameo: string; size?: [number, number];
   prerequisites?: string[]; country?: CountryId;
+  buildLimit?: number;
   power?: number; sight: number; speed?: number; range?: number; damage?: number; cooldown?: number;
   armor?: 'none' | 'light' | 'heavy' | 'building';
-  weapon?: 'bullet' | 'shell' | 'missile' | 'tesla' | 'flame' | 'radiation' | 'explosive';
+  weapon?: 'bullet' | 'shell' | 'missile' | 'tesla' | 'flame' | 'radiation' | 'explosive' | 'bomb' | 'torpedo' | 'sonic' | 'prism' | 'flak' | 'melee' | 'chrono' | 'carrier';
   flying?: boolean; naval?: boolean; amphibious?: boolean; antiAir?: boolean; canAttackGround?: boolean;
   harvest?: boolean; capacity?: number; deploysTo?: string;
   transportCapacity?: number; infantryOnly?: boolean; mindControlImmune?: boolean;
@@ -41,6 +42,12 @@ export interface Entity {
   id: number; type: string; kind: 'unit' | 'building'; owner: number;
   x: number; y: number; hp: number; maxHp: number; angle: number;
   order: Order; path: Point[]; waypoints?: Point[]; cooldown: number; cargo: number;
+  rallyPoint?: Point;
+  primaryFactory?: boolean;
+  prismCharge?: { targetId: number; fireAt: number; supportIds: number[] };
+  homeAirfieldId?: number; aircraftPadIndex?: number; ammo?: number; reloadRemaining?: number; flightHeight?: number;
+  flightSpeed?: number;
+  chronoReadyAt?: number; unloadAfterLanding?: boolean;
   repairing: boolean; veteran: number; kills: number;
   /** Rendering metadata: a shot occurred at this game time. */
   lastShot: number; spawnedAt: number;
@@ -73,6 +80,9 @@ export interface Effect {
   x: number; y: number; toX?: number; toY?: number; age: number; duration: number;
   weapon?: Definition['weapon']; color?: string; text?: string; radius?: number;
   sourceId?: number; targetId?: number;
+  fromHeight?: number; toHeight?: number; arc?: number; burst?: number;
+  beamWidth?: number; prismSupport?: boolean; projectileSprite?: string; delay?: number;
+  impact?: { damage: number; owner: number; splash: number; at: number };
 }
 export interface GameEvent { id: number; time: number; text: string; owner?: number; kind: 'info' | 'warning' | 'combat' | 'complete' }
 export interface GameOptions {

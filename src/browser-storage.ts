@@ -1,9 +1,10 @@
 import { nativeUiAssets, MENU_VIDEO_PATH } from './hud/skin';
 import { APP_BASE, appUrl, scopedCache } from './urls';
+import { combatAssetPaths } from './combat-assets';
 /** Original data is only ever written to this browser's origin-private storage. */
 export const ORIGINAL_CACHE = scopedCache('ra2-originals-v2');
 export const ARCHIVE_CACHE = scopedCache('ra2-download-v1');
-export const ORIGINAL_VERSION = 6;
+export const ORIGINAL_VERSION = 9;
 export const SOURCE_PAGE_URL = 'https://archive.org/details/red-alert-2-multiplayer';
 export const SOURCE_URL = 'https://archive.org/download/red-alert-2-multiplayer/Red-Alert-2-Multiplayer.exe';
 export const SOURCE_BYTES = 206530229;
@@ -22,6 +23,7 @@ export async function originalsReady(): Promise<boolean> {
     const ready = await marker.json() as BrowserReady;
     if (ready.version !== ORIGINAL_VERSION || ready.sourceSha256 !== SOURCE_SHA256 || !Array.isArray(ready.files) || ready.files.length < 3000) return false;
     const paths = new Set((await cache.keys()).map(request => new URL(request.url).pathname));
+    if (!combatAssetPaths.every(path => ready.files.includes(path) && paths.has(path))) return false;
     return ready.files.includes(MENU_VIDEO_PATH) && paths.has(MENU_VIDEO_PATH) && ready.files.every(file => paths.has(file)) && nativeUiAssets.every(({key}) => ready.files.includes(`/assets/ui/${key}.png`) && paths.has(`/assets/ui/${key}.png`));
   } catch { return false; }
 }

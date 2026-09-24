@@ -1,4 +1,6 @@
+import { drawWeaponShot } from './weapon-effects';
 import { EntityTooltip } from './hud/entity-tooltip';
+import { aircraftIsDocked } from './game/aircraft';
 // Shared battlefield input; each renderer supplies its own world projection without replacing simulation.
 import type {ModelLayer} from './bootcamp/model-layer.js';
 import { t } from './i18n';
@@ -126,6 +128,9 @@ export class BattlefieldRenderer {
       if (entity?.owner === this.localId) {
         const def = getDefinition(entity.type);
         if (def.deploysTo) { this.game.deploy([entity.id]); this.hooks.onCommand('deploy'); }
+        else if (this.game.setPrimaryFactory(entity.id)) {
+          this.selection = new Set([entity.id]); this.hooks.onSelection([...this.selection]); this.hooks.onCommand('move');
+        }
         else {
           this.selection = new Set(this.game.entities.filter(v => v.owner === this.localId && v.type === entity.type && this.onScreen(v.x, v.y)).map(v => v.id));
           this.hooks.onSelection([...this.selection]);
@@ -202,6 +207,9 @@ export class BattlefieldRenderer {
     }
     const p = this.screenToTile(x, y), entity = this.pick(x, y);
     if (!this.selection.size) return;
+    if (this.game.setRallyPoint([...this.selection].filter(id => this.game.getEntity(id)?.owner === this.localId), p.x, p.y)) {
+      this.marker(p, false); this.hooks.onCommand('move'); return;
+    }
     if (entity) {
       this.game.commandAttack([...this.selection], entity.id); this.marker({ x: entity.x, y: entity.y }, true);
     } else { this.game.commandMove([...this.selection], p.x, p.y, false, this.planningMode); this.marker(p, false); }
@@ -211,16 +219,20 @@ export class BattlefieldRenderer {
   marker(p: Point, attack: boolean) { this.orderMarker = { ...p, age: 0, attack }; }
   pick(x: number, y: number): Entity | undefined {
     if (this.modelLayer) return this.modelLayer.pick(x, y, this);
-    let nearest: Entity | undefined;
+    let nearest: Entity | undefined, building: Entity | undefined, nearestDistance = Infinity;
     for (let i = this.game.entities.length - 1; i >= 0; i--) {
       const e = this.game.entities[i]; if (e.hp <= 0 || e.transportedBy || !this.game.visible(this.localId, e.x, e.y)) continue;
       const p = this.toScreen(e.x, e.y), def = getDefinition(e.type);p.y-=(this.entityPresentation?.(e)?.height||0)*this.zoom;
       const box = this.displayedSprites.get(e.id);
-      if (e.kind === 'building' && box && x > box.x + box.w * .15 && x < box.x + box.w * .85 && y > box.y + box.h * .3 && y < box.y + box.h * .92) return e;
+      if (e.kind === 'building' && box && x > box.x + box.w * .15 && x < box.x + box.w * .85 && y > box.y + box.h * .3 && y < box.y + box.h * .92) building ??= e;
       const r = (def.category === 'infantry' ? 11 : def.naval ? 28 : 20) * this.zoom;
-      if (Math.abs(x - p.x) < r && Math.abs(y - (p.y - (def.flying ? this.flyingHeight(e, def) * this.zoom : 5))) < r) nearest = e;
+      const dx = x - p.x, dy = y - (p.y - (def.flying ? this.flyingHeight(e, def) * this.zoom : 5));
+      if (e.kind === 'building' && !box && Math.abs(dx) < r && Math.abs(dy) < r) building ??= e;
+      if (e.kind === 'unit' && Math.abs(dx) < r && Math.abs(dy) < r && dx * dx + dy * dy < nearestDistance) {
+        nearest = e; nearestDistance = dx * dx + dy * dy;
+      }
     }
-    return nearest;
+    return nearest ?? building;
   }
   update(dt: number) {
     this.time += dt;
@@ -304,15 +316,12 @@ export class BattlefieldRenderer {
       if (!this.game.visible(this.localId, effect.x, effect.y)) continue;
       const p = this.project(effect.x, effect.y); p.y -= this.elevation(effect.x, effect.y) * 15;
       const t = effect.age / effect.duration;
-      if (this.hdEffects && drawHDCombatEffect(ctx, effect, p, this.game, (x,y) => {const q=this.project(x,y);q.y-=this.elevation(x,y)*15;return q;})) continue;
+      if (this.hdEffects && drawHDCombatEffect(ctx, effect, p, this.game, (x,y) => {const q=this.project(x,y);q.y-=this.elevation(x,y)*15;return q;}, this.assets)) continue;
       if (effect.kind === 'shot' && effect.toX != null && effect.toY != null) {
         const target = this.project(effect.toX, effect.toY); target.y -= this.elevation(effect.toX, effect.toY) * 15;
-        const t1 = Math.max(0, t - .18), t2 = Math.min(1, t + .08);
-        ctx.strokeStyle = effect.weapon === 'tesla' ? '#b4e9ff' : effect.weapon === 'radiation' ? '#b0ff35' : '#ffe58a'; ctx.lineWidth = effect.weapon === 'tesla' ? 2 : 1.5;
-        ctx.beginPath();ctx.moveTo(p.x+(target.x-p.x)*t1,p.y-12+(target.y-p.y)*t1);
-        if(effect.weapon==='tesla'){for(let i=1;i<=6;i++)ctx.lineTo(p.x+(target.x-p.x)*i/6+(Math.random()-.5)*12,p.y-15+(target.y-p.y)*i/6+(Math.random()-.5)*12);}
-        else ctx.lineTo(p.x+(target.x-p.x)*t2,p.y-12+(target.y-p.y)*t2);ctx.stroke();
+        drawWeaponShot(ctx, effect, { x: p.x, y: p.y - (effect.fromHeight ?? 12) }, { x: target.x, y: target.y - (effect.toHeight ?? 6) }, 1, this.assets);
       } else if (effect.kind === 'explosion' || effect.kind === 'nuke') {
+        p.y -= effect.fromHeight ?? 0;
         const explosion=this.assets.sprite(effect.kind==='nuke'?'twlt100':'twlt050');if(explosion&&this.terrainPainter.drawOverlay(ctx,explosion,p.x,p.y,Math.min(explosion.frames-1,Math.floor(t*explosion.frames))))continue;
         const radius = effect.kind === 'nuke' ? 180 : 18;
         ctx.globalAlpha = Math.max(0, 1 - t); const grad = ctx.createRadialGradient(p.x,p.y-10,0,p.x,p.y-10,Math.max(1,radius*t));grad.addColorStop(0,'#fff7b4');grad.addColorStop(.4,'#ffd545');grad.addColorStop(.75,'#e55419');grad.addColorStop(1,'#342d23');
@@ -334,7 +343,7 @@ export class BattlefieldRenderer {
       for (let yy = sy; yy < sy + size[1]; yy++) for (let xx = sx; xx < sx + size[0]; xx++) {
         const q = this.project(xx, yy); q.y -= this.elevation(xx, yy) * 15; this.diamond(ctx, q.x, q.y, valid ? '#78e67580' : '#f0403880', '#182619');
       }
-      const q=this.project(p.x,p.y);q.y-=this.elevation(p.x,p.y)*15;
+      const q=this.project(bounds.centerX-.5,bounds.centerY-.5);q.y-=this.elevation(bounds.centerX,bounds.centerY)*15;
       ctx.globalAlpha=.65;this.assets.draw(ctx,this.spriteKey(this.placement),q.x,q.y);ctx.globalAlpha=1;
     }
     if(this.orderMarker){const m=this.orderMarker,p=this.project(m.x,m.y);p.y-=this.elevation(m.x,m.y)*15;ctx.strokeStyle=m.attack?'#fa6253':'#76ee63';ctx.lineWidth=1;const r=10+m.age*16;ctx.globalAlpha=1-m.age;ctx.beginPath();ctx.ellipse(p.x,p.y,r,r*.5,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(p.x-5,p.y);ctx.lineTo(p.x+5,p.y);ctx.moveTo(p.x,p.y-3);ctx.lineTo(p.x,p.y+3);ctx.stroke();ctx.globalAlpha=1;}
@@ -344,6 +353,17 @@ export class BattlefieldRenderer {
   private drawRoutes() {
     const ctx=this.ctx;ctx.save();ctx.strokeStyle='#ffff00';ctx.fillStyle='#ffff00';ctx.lineWidth=1;ctx.font='11px Tahoma';ctx.setLineDash([4,4]);
     for(const entity of this.game.entities) {
+      if(this.selection.has(entity.id)&&entity.owner===this.localId){
+        const rally=this.game.getRallyPoint(entity);
+        if(rally){
+          const from=this.toScreen(entity.x,entity.y),flag=this.toScreen(rally.x,rally.y);
+          if(entity.primaryFactory)ctx.fillText('★',from.x-5,from.y-10);
+          ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(flag.x,flag.y);ctx.stroke();
+          ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(flag.x,flag.y);ctx.lineTo(flag.x,flag.y-28);ctx.stroke();
+          ctx.beginPath();ctx.moveTo(flag.x,flag.y-28);ctx.lineTo(flag.x+18,flag.y-23);ctx.lineTo(flag.x,flag.y-17);ctx.closePath();ctx.fill();
+          ctx.setLineDash([4,4]);
+        }
+      }
       if(!this.selection.has(entity.id)||entity.owner!==this.localId||entity.hp<=0||(!this.planningMode&&!entity.waypoints?.length))continue;
       if(entity.order.kind!=='move'&&entity.order.kind!=='attackMove')continue;
       const points=[entity,entity.order,...entity.waypoints||[]].map(p=>this.toScreen(p.x,p.y));
@@ -356,11 +376,8 @@ export class BattlefieldRenderer {
   private spriteKey(def: Definition) { const snow = `${def.sprite}-snow`; return this.map.theater?.toLowerCase() === 'snow' && this.assets.sprite(snow) ? snow : def.sprite; }
   private flyingHeight(e: Entity, def: Definition): number {
     if (!def.flying) return 0;
-    if (def.category === 'aircraft' && e.order.kind === 'idle' && this.game.entities.some(factory => {
-      if (factory.type !== 'airforce_command' || factory.owner !== e.owner || factory.hp <= 0) return false;
-      const [width, height] = getDefinition(factory.type).size ?? [3, 2];
-      return Math.abs(e.x - factory.x) < width / 2 && Math.abs(e.y - factory.y) < height / 2;
-    })) return 0;
+    if (e.flightHeight !== undefined) return e.flightHeight;
+    if (def.category === 'aircraft' && aircraftIsDocked(e, this.game.entities)) return 0;
     return 45 + Math.sin(this.time * 3 + e.id) * 2;
   }
   private drawEntity(ctx: CanvasRenderingContext2D, e: Entity) {
@@ -379,9 +396,17 @@ export class BattlefieldRenderer {
       if (image) {
         fw = sprite.frameWidth; fh = sprite.frameHeight; ax = sprite.anchorX; ay = sprite.anchorY;
         let frame = 0;
+        if (e.type === 'prism_tower' && sprite.sequences) {
+          const charge = e.prismCharge ?? this.game.entities.find(tower => tower.prismCharge?.supportIds.includes(e.id))?.prismCharge;
+          const sequence = sprite.sequences[charge ? 'fireup' : 'ready'];
+          if (sequence) {
+            const phase = charge ? Math.max(0, 1 - (charge.fireAt - this.game.time) / (28 / 15)) : this.game.time % 1;
+            frame = sequence[0] + (this.game.isPowered(e.owner) ? Math.min(sequence[1] - 1, Math.floor(phase * sequence[1])) : 0);
+          }
+        }
         const moving = sprite.hdMotion ? unitIsMoving(e,this.game.time) : e.path.length > 0;
-        if (def.kind === 'unit' && sprite.frames > 1) {
-          if (sprite.sequences) { frame=spriteAnimation(sprite,e,this.game.time).frame; }
+        if ((def.kind === 'unit' || (sprite.facings ?? 1) > 1) && sprite.frames > 1) {
+          if (sprite.sequences) { frame=spriteAnimation(sprite,e,this.game.time,!!def.amphibious && def.category === 'infantry' && this.game.terrainAt(e.x,e.y) === 'water').frame; }
           else frame = spriteFacing(sprite,e.angle);
         }
         if(presentation?.frame!=null)frame=presentation.frame;
@@ -409,7 +434,7 @@ export class BattlefieldRenderer {
 
         if(hdMotion)ctx.restore();
         ctx.imageSmoothingEnabled = smoothing; rendered = true;
-        const screen = this.toScreen(e.x,e.y); this.displayedSprites.set(e.id,{x:screen.x-ax*this.zoom,y:screen.y-(ay+flying+(presentation?.height||0))*this.zoom,w:fw*this.zoom,h:fh*this.zoom});
+        const screen = this.toScreen(e.x,e.y); this.displayedSprites.set(e.id,{x:screen.x-ax*this.zoom,y:screen.y-(ay+flying+(e.kind==='building'?15:0)+(presentation?.height||0))*this.zoom,w:fw*this.zoom,h:fh*this.zoom});
       }
     }
     if(!rendered){this.drawFallbackUnit(ctx,p.x,p.y-flying,e,def,color);}
@@ -451,6 +476,8 @@ export class BattlefieldRenderer {
     this.miniCtx=canvas.getContext('2d')!;canvas.width=400;canvas.height=280;
     const click=(e:MouseEvent)=>{const r=canvas.getBoundingClientRect();const x=(e.clientX-r.left)*canvas.width/r.width,y=(e.clientY-r.top)*canvas.height/r.height;const wx=(x-this.miniOrigin.x)/this.miniScale,wy=(y-this.miniOrigin.y)/this.miniScale;this.camera.x=wx;this.camera.y=wy;this.clampCamera();};
     canvas.addEventListener('click',click);this.cleanup.push(()=>canvas.removeEventListener('click',click));
+    const rightClick=(e:MouseEvent)=>{e.preventDefault();e.stopPropagation();click(e);this.draw();this.drawMinimap();};
+    canvas.addEventListener('contextmenu',rightClick);this.cleanup.push(()=>canvas.removeEventListener('contextmenu',rightClick));
     this.makeMinimapBase(canvas.width,canvas.height);
   }
   private makeMinimapBase(w:number,h:number){

@@ -81,3 +81,16 @@
 /* Keep the shared build identity clear of the native scroll buttons. */
 body:has(.ra2-sidebar) .build-version { inset-inline-end:176px; }
 @media(prefers-reduced-motion:reduce) { .ra2-sidebar .ra2-icon.has-ready { animation:none; background-position:var(--ready-frame)!important; } }
+
+.superweapon-timers {
+  position:absolute; right:8px; bottom:20px; z-index:4; pointer-events:none;
+  display:grid; align-items:center; justify-items:end; column-gap:4px;
+  max-width:calc(100% - 16px);
+  font:500 12px/20px 'Fira Sans Condensed',Arial,sans-serif;
+  font-variant-numeric:tabular-nums; text-align:right;
+}
+.superweapon-timers > div { background:rgba(0,0,0,.75); padding:3px 4px; white-space:pre; }
+.superweapon-timers[hidden] { display:none; }
+.superweapon-timers .ready { animation:superweapon-ready 1s steps(1,end) infinite; }
+@keyframes superweapon-ready { 50% { opacity:.45; } }
+@media(prefers-reduced-motion:reduce) { .superweapon-timers .ready { animation:none; } }

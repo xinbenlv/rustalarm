@@ -19,7 +19,7 @@ This project is also **not associated with, sponsored by or endorsed by OpenAI o
 
 ## About the game
 
-A browser RTS focused on Red Alert 2 skirmishes and Bootcamp, with original Westwood artwork, maps, voices and music converted on the player's device. The game engine, AI, rendering and interface are independently written in TypeScript. No existing implementation on the user's computer or at `github.com/xinbenlv` was consulted.
+A browser RTS focused on Red Alert 2 skirmishes and Bootcamp, with original Westwood artwork, maps, voices and music converted on the player's device. The game engine, AI, rendering and interface are independently written in TypeScript. The initial implementation did not consult existing game implementations. Later regression fixes compare behavior with the local Chrono Divide references requested by the user.
 
 ## Create and share maps
 
@@ -248,3 +248,16 @@ standing/prone/water shooting, crawl, down/up, swimming/treading, idle, death,
 parachute and cheer sequences. Poses are reconstructed references, not exact
 recovery of the source 3D animation. See [motion tooling](../tools/tanya-motion/README.md)
 and run `npm run motion:test` for the delivered motion/mapping checks.
+
+## 生产建筑支持集结点，战机会自动返航
+
+玩家选中兵营、战车工厂或船坞后，可以右键设置集结点。
+选中的生产建筑显示旗帜和连接线。
+玩家双击生产建筑后，可以选择新单位的生产地点。
+主工厂显示星号。雷达右键将视图移到对应位置。
+
+每座机场提供四个战机名额，飞行中的战机仍占用名额。
+入侵者和黑鹰发射空对地导弹，基洛夫投弹。
+战机完成移动或失去目标后，会返回所属机场着陆。
+战机耗尽弹药后，会返航装弹，再继续攻击。
+四类超级武器和谭雅达到限额后，按钮保留并变暗。

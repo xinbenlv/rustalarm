@@ -1,12 +1,18 @@
 <!-- Product entry, local startup and links to detailed gameplay and verification guides. -->
 # Rust Alarm
 
+An open-source remake of EA’s Command & Conquer: Red Alert 2 (RA2).
+
+开源重制 EA’s Command & Conquer: Red Alert 2。
+
+An unofficial fan project with no affiliation with or endorsement from EA. 非官方项目，与 EA 无隶属或背书关系。
+
 An independent browser RTS with original artwork prepared on the player's device.
 Choose **Skirmish / 遭遇战** to fight computer opponents, or **Bootcamp / 新兵训练营**
 to freely build and recruit supported units on an asset training field.
 
 Created by [Victor Zhou](https://zzn.im) on 2026-09-04 using
-ChatGPT 6 Astra, with the original result at [v0.1.0](https://github.com/xinbenlv/ra2-gpt-6-astra-2026-09-04/commit/3b9e9eaa2aa3b13db1f1bb1daca0f833d48986bf).
+ChatGPT 6 Astra, with the original result at [v0.1.0](https://github.com/xinbenlv/rustalarm/commit/3b9e9eaa2aa3b13db1f1bb1daca0f833d48986bf).
 
 ## Prepare local originals after cloning
 
@@ -32,7 +38,7 @@ and converted assets persist across local starts, so `npm run dev` reuses them.
 
 ## Play
 
-[Play the published version](https://xinbenlv.github.io/ra2-gpt-6-astra-2026-09-04/).
+[Play the published version](https://ra2.apps.zzn.im/).
 Bootcamp in this checkout is **v0.5.0**; a local implementation does not update that site.
 
 ```sh
@@ -100,7 +106,7 @@ Authored GLBs are emitted at content-hashed `app/models` paths and loaded on dem
 Original `/assets` and `/maps` remain browser-private; Vite public copying stays off.
 The footer identifies the local commit; changes do not deploy the site.
 
-[UI acceptance](docs/menus-verification.md) · [Bootcamp acceptance](docs/bootcamp-verification.md) · [Detailed game/asset/editor guide](docs/game-guide.md) ·
+[UI acceptance](docs/menus-verification.md) · [Bootcamp acceptance](docs/bootcamp-verification.md) · [战斗与支援代码比对](docs/combat-fidelity-comparison.md) · [Detailed game/asset/editor guide](docs/game-guide.md) ·
 [Source map](src/README.md) · [Browser tests](scripts/README.md) · [Local model tools](tools/README.md) ·
 [Earlier verification](docs/verification.md) · [Asset workflow](.agents/skills/ra2-hd-blender/SKILL.md)
 

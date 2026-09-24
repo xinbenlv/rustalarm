@@ -94,6 +94,20 @@ function validateEntity(e: Entity, owners: Set<number>, known: (type: string) =>
   record(e); integer(e.id, 1); requireSave(owners.has(e.owner));
   const definition = known(e.type); requireSave(definition && definition.kind === e.kind);
   point(e);
+  if (e.rallyPoint !== undefined) point(e.rallyPoint);
+  if (e.primaryFactory !== undefined) bool(e.primaryFactory);
+  if (e.homeAirfieldId !== undefined) integer(e.homeAirfieldId, 1);
+  if (e.aircraftPadIndex !== undefined) integer(e.aircraftPadIndex, 0, 3);
+  if (e.ammo !== undefined) integer(e.ammo, 0, 1);
+  if (e.reloadRemaining !== undefined) finite(e.reloadRemaining, 0, 18);
+  if (e.flightHeight !== undefined) finite(e.flightHeight, 0, 150);
+  if (e.flightSpeed !== undefined) finite(e.flightSpeed, 0, 20);
+  if (e.prismCharge !== undefined) {
+    record(e.prismCharge); integer(e.prismCharge.targetId, 1); finite(e.prismCharge.fireAt, 0);
+    list(e.prismCharge.supportIds, 8); for (const id of e.prismCharge.supportIds) integer(id, 1);
+  }
+  if (e.unloadAfterLanding !== undefined) bool(e.unloadAfterLanding);
+  if (e.chronoReadyAt !== undefined) finite(e.chronoReadyAt, 0);
   for (const key of ['hp','maxHp','angle','cooldown','cargo','veteran','kills','lastShot','spawnedAt','harvestTimer','repathTimer'] as const) finite(e[key]);
   requireSave(e.maxHp > 0 && e.hp <= e.maxHp); bool(e.repairing);
   for (const key of ['path','waypoints'] as const) {
@@ -168,8 +182,19 @@ export function validateEngineSnapshot(value: unknown): EngineSnapshot {
     if (effect.text !== undefined) textValue(effect.text);
     for (const key of ['toX','toY','radius'] as const) if (effect[key] !== undefined) finite(effect[key]);
     for (const key of ['sourceId','targetId'] as const) if (effect[key] !== undefined) integer(effect[key], 1, s.nextId - 1);
-    if (effect.weapon !== undefined) requireSave(['bullet','shell','missile','tesla','flame','radiation','explosive'].includes(effect.weapon));
+    if (effect.weapon !== undefined) requireSave(['bullet','shell','missile','tesla','flame','radiation','explosive','bomb','torpedo','sonic','prism','flak','melee','chrono','carrier'].includes(effect.weapon));
     if (effect.color !== undefined) textValue(effect.color, 80);
+    for (const key of ['fromHeight','toHeight','arc'] as const) if (effect[key] !== undefined) finite(effect[key], 0, 200);
+    if (effect.burst !== undefined) integer(effect.burst, 1, 3);
+    if (effect.beamWidth !== undefined) finite(effect.beamWidth, .1, 10);
+    if (effect.prismSupport !== undefined) bool(effect.prismSupport);
+    if (effect.projectileSprite !== undefined) requireSave(effect.projectileSprite === 'dragon');
+    if (effect.delay !== undefined) finite(effect.delay, 0, effect.duration - .000001);
+    if (effect.impact !== undefined) {
+      record(effect.impact); finite(effect.impact.damage, 0); requireSave(owners.has(effect.impact.owner));
+      finite(effect.impact.splash, 0, 20); finite(effect.impact.at, 0, effect.duration);
+      finite(effect.toX); finite(effect.toY);
+    }
   }
   for (const event of s.events) {
     record(event); integer(event.id, 1, s.nextEvent - 1); finite(event.time, 0); textValue(event.text);

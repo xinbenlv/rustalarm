@@ -88,3 +88,14 @@ across browser restarts, both modes, native/imported maps, file backups, transac
 rollback, confirmations, languages and failed-load recovery. Evidence stays in
 `.cache/saves/evidence/`. The development server must have prepared local assets.
 The script also checks saved build identity, map overviews, old saves and narrow screens.
+
+`node scripts/browser_production.mjs` 验证机场和生产回归。
+浏览器测试检查满额禁用、起飞名额、停机点击和通知节点。
+测试默认访问端口 4248，截图存放在 `.cache/airfield/`。
+
+`browser_behaviors.mjs` 验证集结点、主工厂和雷达右键。
+测试也检查限额按钮、建筑部件、战机出击与返航。
+测试使用独立 Chrome，并把截图写入 `.cache/behavior/`。
+
+`browser_combat_fidelity.mjs` 验证光棱、导弹和支援界面。
+测试默认使用端口 4259，截图写入 `.cache/combat-fidelity/`。

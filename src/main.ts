@@ -6,6 +6,7 @@ import { projectNotice, sourceCodeLink } from './project-notice';
 import { mountRendererSwitch } from './bootcamp/switcher';
 import { Sidebar, sidebarMarkup } from './hud/sidebar';
 import { renderProduction } from './hud/production';
+import { renderSuperweaponTimers } from './hud/superweapon-timers';
 import { availableTabs } from './hud/availability';
 import { loadMenuSkin } from './hud/menu-skin';
 import { mountMenuVideo } from './hud/menu-video';
@@ -15,6 +16,7 @@ import { showOptions, applyScreenSize } from './hud/options';
 import { layoutLobby } from './hud/lobby-layout';
 import { openMapPicker } from './hud/map-picker';
 import { mountDebugPanel } from './debug-panel';
+import { productionSound, renderBattleNotices } from './hud/notifications';
 import { appUrl } from './urls';
 import { t, registerTranslations, localizeElement, languageControl, bindLanguageControl } from './i18n';
 import { probeOriginalAssets, showAssetSetup, OriginalAssetsError } from './asset-setup';
@@ -323,13 +325,16 @@ function renderGame(map:RenderMap){
   const faction=game!.players[0].faction;
   app.innerHTML=`<main class="game-screen"><div class="game-body"><section class="battlefield" id="battlefield"><canvas id="battlefield-canvas" tabindex="0" aria-label="即时战略战场"></canvas><div class="hud-message" id="hud-message"></div><div class="battlefield-tools" id="battlefield-tools"></div><div class="selection-info" id="selection-info"></div></section>${sidebarMarkup}</div><footer class="game-bottom"><nav id="command-bar" aria-label="作战命令"></nav><span id="selection-label"></span><span id="battle-status"></span><span id="game-time">00:00</span></footer></main>`;
   applyScreenSize();
+  const timers = document.createElement('div');
+  timers.id = 'superweapon-timers'; timers.className = 'superweapon-timers';
+  $('#battlefield').append(timers);
   sidebar=new Sidebar($('.ra2-sidebar'),assets,faction);
   renderer=new BattlefieldRenderer($('#battlefield-canvas'),game!,map,assets,{
     onSelection:()=>{updateSelection();const selected=game!.entities.find(e=>renderer?.selection.has(e.id));if(selected)sound.voice(selected.type,'select');},onCommand:(kind)=>{const selected=game!.entities.find(e=>renderer?.selection.has(e.id));if(kind==='deploy')sound.play('uplace');else if(selected)sound.voice(selected.type,kind==='attack'?'attack':'move');if(renderer&&!renderer.attackMove)$('#battlefield').classList.remove('attack-mode');},onNotice:text=>{notice(text);clearTools();},
     onPlace:(x,y)=>{
       if(supportMode){const success=game!.support(0,supportMode,x,y,[...renderer!.selection]);if(success){supportMode=undefined;renderer!.tool='select';notice('支援命令已下达。');}return success;}
       const def=renderer!.placement;if(!def)return false;
-      const success=game!.place(0,def.id,x,y);if(success){renderer!.placement=undefined;$('#battlefield').classList.remove('build-mode');sound.play(`${game!.players[0].faction}_constructioncomplete`);renderBuildList();}else{notice(game!.bootcamp?game!.lastMessage:'无法在此建造。请选择已探明、平坦且靠近基地的区域。',true);sound.play(`${game!.players[0].faction}_cannotdeployhere`);}return success;
+      const success=game!.place(0,def.id,x,y);if(success){renderer!.placement=undefined;$('#battlefield').classList.remove('build-mode');sound.play('uplace');renderBuildList();}else{notice(game!.bootcamp?game!.lastMessage:'无法在此建造。请选择已探明、平坦且靠近基地的区域。',true);sound.play(`${game!.players[0].faction}_cannotdeployhere`);}return success;
     },
     onEntityClick:e=>{
       if(renderer!.tool==='repair'){if(e.owner===0)game!.repair(e.id);return true;}
@@ -354,8 +359,8 @@ function renderBuildList(){
   if(game){const tabs=availableTabs(game);if(!tabs.includes(category))category=tabs[0]||'structure';}
   if(!game||!renderer||!sidebar)return;
   buildSignature=renderProduction({game,assets,category,clock:sidebar.ui.gclock2,
-    onBuild:id=>{const d=CATALOG[id],p=game!.players[0];if(!game!.build(0,id))notice(game!.getBuildReason(0,id)||'当前无法生产。',true);else sound.play(`${p.faction}_${d.kind==='building'?'building':d.category==='infantry'?'training':'unitready'}`);renderBuildList();},
-    onReady:id=>{const d=CATALOG[id];clearTools();renderer!.placement=d;renderer!.tool='select';$('#battlefield').className='battlefield build-mode';notice(`选择 ${d.name} 的建造位置。右键取消。`);},
+    onBuild:id=>{const d=CATALOG[id],p=game!.players[0];if(!game!.build(0,id))notice(game!.getBuildReason(0,id)||'当前无法生产。',true);else sound.play(`${p.faction}_${d.kind==='building'?'building':'training'}`);renderBuildList();},
+    onReady:id=>{const d=CATALOG[id];clearTools();renderer!.placement=d;renderer!.tool='select';$('#battlefield').className='battlefield build-mode';},
     onCancel:kind=>{game!.cancelBuild(0,kind);renderBuildList();},
     onSupport:id=>{clearTools();supportMode=id;renderer!.tool='support';notice('在战场上选择支援目标。');},
   },buildSignature);
@@ -371,8 +376,14 @@ function updateUI(){
   if(!game||!renderer)return;const p=game.players[0];
   const mins=Math.floor(game.time/60),secs=Math.floor(game.time%60);$('#game-time').textContent=`${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
   $('#battle-status').textContent=game.paused?'已暂停':p.powerConsumed>p.powerProduced?'电力不足':`剩余阵营 ${new Set(game.players.filter(v=>!v.defeated).map(v=>v.team)).size}`;
-  const events=game.events.filter(e=>e.id>lastEvent&&(e.owner===undefined||e.owner===0));for(const ev of events){notice(ev.text,ev.kind==='warning');if(ev.kind==='complete'){sound.play(`${p.faction}_${ev.text.includes('单位')||ev.text.includes('训练')?'unitready':'constructioncomplete'}`);lastComplete=ev.id;}}lastEvent=game.events.at(-1)?.id||lastEvent;
-  notices=notices.filter(n=>n.until>performance.now());$('#hud-message').innerHTML=notices.slice(-3).map(n=>`<div class="notice ${n.warn?'warn':''}">${escape(n.text)}</div>`).join('');
+  const events=game.events.filter(e=>e.id>lastEvent&&(e.owner===undefined||e.owner===0));
+  for(const ev of events){
+    if(ev.kind==='complete'){const cue=productionSound(ev);if(cue)sound.play(`${p.faction}_${cue}`);lastComplete=ev.id;}
+    else notice(ev.text,ev.kind==='warning');
+  }
+  lastEvent=game.events.at(-1)?.id||lastEvent;
+  notices=notices.filter(n=>n.until>performance.now());renderBattleNotices($('#hud-message'),notices);
+  renderSuperweaponTimers($('#superweapon-timers'),game);
   renderer.drawMinimap();updateSelection();renderBuildList();
   updateCommandBar($('#command-bar'),game,renderer,groups);
   translateUI();
@@ -391,7 +402,7 @@ function playBattleSounds(){
     else if(effect.kind==='explosion')sound.playEvent('Explosion01');else if(effect.kind==='nuke')sound.playEvent('NukeExplosion');
   }
 }
-function notice(text:string,warn=false){notices.push({text,until:performance.now()+6500,warn});}
+function notice(text:string,warn=false){const now=performance.now();if(!notices.some(n=>n.text===text&&n.warn===warn&&n.until>now))notices.push({text,until:now+6500,warn});}
 function toast(text:string){document.querySelector('.error-toast')?.remove();const el=document.createElement('div');el.className='error-toast';el.textContent=t(text);document.body.append(el);setTimeout(()=>el.remove(),5000);}
 function showGameMenu(title:string,body:string,actions:string) {
   const root=showModal(title,`<div class="pause-content">${body}${actions?`<div class="modal-actions">${actions}</div>`:''}</div><aside class="command-rail">${railHeader(title)}<button id="resume">返回战场</button><button id="pause-save">存档</button><button id="pause-load">取档</button><button id="pause-settings">选项</button><button id="pause-help">操作说明</button><button id="surrender">${game!.bootcamp?'结束训练':'投降'}</button><button id="leave">退出游戏</button>${languageControl()}<div class="rail-bottom"></div></aside>`,'');

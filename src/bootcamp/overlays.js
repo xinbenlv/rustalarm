@@ -1,3 +1,4 @@
+import { drawWeaponShot } from '../weapon-effects';
 // Gameplay feedback projected through the active 3D camera, using existing effects and placement state.
 export function drawWorldOverlays(view,layer,marker){
   const {ctx,game}=view,project=(x,y,h=0)=>layer.rig.project(x,y,view,true,h);
@@ -9,11 +10,12 @@ export function drawWorldOverlays(view,layer,marker){
     if(!game.visible(view.localId,effect.x,effect.y))continue;
     const t=effect.age/effect.duration,p=project(effect.x,effect.y,.25);
     if(effect.kind==='shot'&&effect.toX!=null&&effect.toY!=null){
-      const target=project(effect.toX,effect.toY,.25);ctx.strokeStyle=effect.weapon==='tesla'?'#b4e9ff':'#ffe58a';ctx.lineWidth=2;
-      const a=Math.max(0,t-.18),b=Math.min(1,t+.08);ctx.beginPath();ctx.moveTo(p.x+(target.x-p.x)*a,p.y+(target.y-p.y)*a);ctx.lineTo(p.x+(target.x-p.x)*b,p.y+(target.y-p.y)*b);ctx.stroke();
+      const source=project(effect.x,effect.y,(effect.fromHeight??12)/30),target=project(effect.toX,effect.toY,(effect.toHeight??6)/30);
+      drawWeaponShot(ctx,effect,source,target,view.zoom,view.assets);
     }else if(effect.kind==='explosion'||effect.kind==='nuke'){
+      const impact=project(effect.x,effect.y,(effect.fromHeight??0)/30);
       const name=effect.kind==='nuke'?'twlt100':'twlt050',sprite=view.assets.sprite(name);
-      if(sprite)view.assets.draw(ctx,name,p.x,p.y,Math.min(sprite.frames-1,Math.floor(t*sprite.frames)),view.zoom);
+      if(sprite)view.assets.draw(ctx,name,impact.x,impact.y,Math.min(sprite.frames-1,Math.floor(t*sprite.frames)),view.zoom);
     }else if(effect.kind==='text'&&effect.text){ctx.font='bold 12px Tahoma';ctx.fillStyle=effect.color||'#ffeba6';ctx.fillText(effect.text,p.x,p.y-t*24);}
     else if(effect.kind==='deploy'||effect.kind==='hit'){
       ctx.strokeStyle=effect.color||'#e9bc63';ctx.globalAlpha=1-t;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(1,t*18*view.zoom),0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;
